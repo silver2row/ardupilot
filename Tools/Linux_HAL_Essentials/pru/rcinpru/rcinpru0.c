@@ -28,7 +28,7 @@ static inline u32 read_PIEP_COUNT(void)
 }
 
 uint32_t read_pin(void){
-    return ((__R31&(1<<16)) != 0);
+    return ((__R31&(1<<15)) != 0);
 }
 
 void main()
