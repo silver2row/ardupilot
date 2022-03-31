@@ -17,6 +17,7 @@
 #include <AP_Baro/AP_Baro.h>
 #include <AP_Airspeed/AP_Airspeed.h>
 #include <AP_BattMonitor/AP_BattMonitor.h>
+#include <AP_Compass/AP_Compass.h>
 #include <AP_ESC_Telem/AP_ESC_Telem.h>
 #include <RC_Channel/RC_Channel.h>
 #include <AP_Common/AP_FWVersion.h>
@@ -180,7 +181,7 @@ void AP_MSP_Telem_Backend::update_home_pos(home_state_t &home_state)
     WITH_SEMAPHORE(_ahrs.get_semaphore());
     Location loc;
     float alt;
-    if (_ahrs.get_position(loc) && _ahrs.home_is_set()) {
+    if (_ahrs.get_location(loc) && _ahrs.home_is_set()) {
         const Location &home_loc = _ahrs.get_home();
         home_state.home_distance_m = home_loc.get_distance(loc);
         home_state.home_bearing_cd = loc.get_bearing_to(home_loc);
@@ -316,7 +317,7 @@ void AP_MSP_Telem_Backend::update_flight_mode_str(char *flight_mode_str, uint8_t
                 MANU [S]
                 MANU [SS]
         */
-#ifndef HAL_NO_GCS
+#if HAL_GCS_ENABLED
         const char* simple_mode_str = gcs().simple_input_active() ? " [S]" : (gcs().supersimple_input_active() ? " [SS]" : "");
         snprintf(flight_mode_str, size, "%s%s", notify->get_flight_mode_str(), simple_mode_str);
 #else
@@ -567,7 +568,7 @@ void AP_MSP_Telem_Backend::msp_handle_baro(const MSP::msp_baro_data_message_t &p
 
 void AP_MSP_Telem_Backend::msp_handle_airspeed(const MSP::msp_airspeed_data_message_t &pkt)
 {
-#if HAL_MSP_AIRSPEED_ENABLED
+#if HAL_MSP_AIRSPEED_ENABLED && AP_AIRSPEED_ENABLED
     auto *airspeed = AP::airspeed();
     if (airspeed) {
         airspeed->handle_msp(pkt);
@@ -906,11 +907,10 @@ MSPCommandResult AP_MSP_Telem_Backend::msp_process_out_analog(sbuf_t *dst)
     } analog {
         voltage_dv : (uint8_t)constrain_int16(battery_state.batt_voltage_v * 10, 0, 255),                   // battery voltage V to dV
         mah : (uint16_t)constrain_int32(battery_state.batt_consumed_mah, 0, 0xFFFF),                        // milliamp hours drawn from battery
-        rssi : uint16_t(get_rssi(rssi) ? (uint16_t)constrain_float(rssi,0,1) * 1023 : 0),                   // rssi 0-1 to 0-1023),                           // rssi 0-1 to 0-1023
+        rssi : uint16_t(get_rssi(rssi) ? constrain_float(rssi,0,1) * 1023 : 0),                             // rssi 0-1 to 0-1023)
         current_ca : (int16_t)constrain_int32(battery_state.batt_current_a * 100, -0x8000, 0x7FFF),         // current A to cA (0.01 steps, range is -320A to 320A)
         voltage_cv : (uint16_t)constrain_int32(battery_state.batt_voltage_v * 100,0,0xFFFF)                 // battery voltage in 0.01V steps
     };
-
     sbuf_write_data(dst, &analog, sizeof(analog));
     return MSP_RESULT_ACK;
 }

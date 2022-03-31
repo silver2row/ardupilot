@@ -3,6 +3,12 @@
 #include "AP_RangeFinder.h"
 #include "AP_RangeFinder_Backend_Serial.h"
 
+#ifndef AP_RANGEFINDER_LEDDARVU8_ENABLED
+#define AP_RANGEFINDER_LEDDARVU8_ENABLED 1
+#endif
+
+#if AP_RANGEFINDER_LEDDARVU8_ENABLED
+
 #define LEDDARVU8_PAYLOAD_LENGTH (8*2)
 
 class AP_RangeFinder_LeddarVu8 : public AP_RangeFinder_Backend_Serial
@@ -25,7 +31,7 @@ protected:
     }
 
     // get a reading, distance returned in reading_cm
-    bool get_reading(uint16_t &reading_cm) override;
+    bool get_reading(float &reading_m) override;
 
     // maximum time between readings before we change state to NoData:
     uint16_t read_timeout_ms() const override { return 500; }
@@ -90,3 +96,5 @@ private:
     uint32_t last_distance_ms;                      // system time of last successful distance sensor read
     uint32_t last_distance_request_ms;              // system time of last request to sensor to send distances
 };
+
+#endif

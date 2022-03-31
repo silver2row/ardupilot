@@ -15,11 +15,13 @@
 
 #include "AP_Generator.h"
 
-#if GENERATOR_ENABLED
+#if HAL_GENERATOR_ENABLED
 
 #include "AP_Generator_IE_650_800.h"
 #include "AP_Generator_IE_2400.h"
 #include "AP_Generator_RichenPower.h"
+
+#include <GCS_MAVLink/GCS.h>
 
 const AP_Param::GroupInfo AP_Generator::var_info[] = {
 

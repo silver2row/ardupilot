@@ -25,6 +25,8 @@
 #include <AP_BoardConfig/AP_BoardConfig.h>     // board configuration library
 #include <AP_CANManager/AP_CANManager.h>
 #include <AP_Button/AP_Button.h>
+#include <AP_Compass/AP_Compass.h>
+#include <AP_EFI/AP_EFI.h>
 #include <AP_GPS/AP_GPS.h>
 #include <AP_Generator/AP_Generator.h>
 #include <AP_Logger/AP_Logger.h>
@@ -46,6 +48,8 @@
 #include <AP_Frsky_Telem/AP_Frsky_Parameters.h>
 #include <AP_ExternalAHRS/AP_ExternalAHRS.h>
 #include <AP_VideoTX/AP_SmartAudio.h>
+#include <SITL/SITL.h>
+#include <AP_CustomRotations/AP_CustomRotations.h>
 
 class AP_Vehicle : public AP_HAL::HAL::Callbacks {
 
@@ -184,7 +188,7 @@ public:
     // returns true if the vehicle has crashed
     virtual bool is_crashed() const;
 
-#ifdef ENABLE_SCRIPTING
+#if AP_SCRIPTING_ENABLED
     /*
       methods to control vehicle for use by scripting
     */
@@ -197,8 +201,14 @@ public:
     virtual bool set_target_velaccel_NED(const Vector3f& target_vel, const Vector3f& target_accel, bool use_yaw, float yaw_deg, bool use_yaw_rate, float yaw_rate_degs, bool yaw_relative) { return false; }
     virtual bool set_target_angle_and_climbrate(float roll_deg, float pitch_deg, float yaw_deg, float climb_rate_ms, bool use_yaw_rate, float yaw_rate_degs) { return false; }
 
+    // command throttle percentage and roll, pitch, yaw target
+    // rates. For use with scripting controllers
+    virtual void set_target_throttle_rate_rpy(float throttle_pct, float roll_rate_dps, float pitch_rate_dps, float yaw_rate_dps) {}
+    virtual bool nav_scripting_enable(uint8_t mode) {return false;}
+
     // get target location (for use by scripting)
     virtual bool get_target_location(Location& target_loc) { return false; }
+    virtual bool update_target_location(const Location &old_loc, const Location &new_loc) { return false; }
 
     // circle mode controls (only used by scripting with Copter)
     virtual bool get_circle_radius(float &radius_m) { return false; }
@@ -206,7 +216,16 @@ public:
 
     // set steering and throttle (-1 to +1) (for use by scripting with Rover)
     virtual bool set_steering_and_throttle(float steering, float throttle) { return false; }
-#endif // ENABLE_SCRIPTING
+
+    // set turn rate in deg/sec and speed in meters/sec (for use by scripting with Rover)
+    virtual bool set_desired_turn_rate_and_speed(float turn_rate, float speed) { return false; }
+
+    // support for NAV_SCRIPT_TIME mission command
+    virtual bool nav_script_time(uint16_t &id, uint8_t &cmd, float &arg1, float &arg2) { return false; }
+    virtual void nav_script_time_done(uint16_t id) {}
+
+    // allow for VTOL velocity matching of a target
+    virtual bool set_velocity_match(const Vector2f &velocity) { return false; }
 
 
     // control outputs enumeration
@@ -226,8 +245,8 @@ public:
     // returns true on success and control_value is set to a value in the range -1 to +1
     virtual bool get_control_output(AP_Vehicle::ControlOutput control_output, float &control_value) { return false; }
 
-    // write out harmonic notch log messages
-    void write_notch_log_messages() const;
+#endif // AP_SCRIPTING_ENABLED
+
     // update the harmonic notch
     virtual void update_dynamic_notch() {};
 
@@ -339,7 +358,7 @@ protected:
     AP_MSP msp;
 #endif
 
-#if GENERATOR_ENABLED
+#if HAL_GENERATOR_ENABLED
     AP_Generator generator;
 #endif
 
@@ -351,6 +370,15 @@ protected:
     AP_SmartAudio smartaudio;
 #endif
 
+#if HAL_EFI_ENABLED
+    // EFI Engine Monitor
+    AP_EFI efi;
+#endif
+
+#if AP_AIRSPEED_ENABLED
+    AP_Airspeed airspeed;
+#endif
+
     static const struct AP_Param::GroupInfo var_info[];
     static const struct AP_Scheduler::Task scheduler_tasks[];
 
@@ -358,10 +386,16 @@ protected:
     void publish_osd_info();
 #endif
 
+#if HAL_INS_ACCELCAL_ENABLED
     // update accel calibration
     void accel_cal_update();
+#endif
 
     ModeReason control_mode_reason = ModeReason::UNKNOWN;
+
+#if AP_SIM_ENABLED
+    SITL::SIM sitl;
+#endif
 
 private:
 
@@ -384,6 +418,8 @@ private:
     bool done_safety_init;
 
     uint32_t _last_internal_errors;  // backup of AP_InternalError::internal_errors bitmask
+
+    AP_CustomRotations custom_rotations;
 };
 
 namespace AP {

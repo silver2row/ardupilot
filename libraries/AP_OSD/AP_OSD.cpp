@@ -217,12 +217,13 @@ const AP_Param::GroupInfo AP_OSD::var_info[] = {
     AP_SUBGROUPINFO(param_screen[1], "6_", 22, AP_OSD, AP_OSD_ParamScreen),
 #endif
 
+#if OSD_ENABLED
     // additional tables to go beyond 63 limit
     AP_SUBGROUPINFO2(screen[0], "1_", 27, AP_OSD, AP_OSD_Screen),
     AP_SUBGROUPINFO2(screen[1], "2_", 28, AP_OSD, AP_OSD_Screen),
     AP_SUBGROUPINFO2(screen[2], "3_", 29, AP_OSD, AP_OSD_Screen),
     AP_SUBGROUPINFO2(screen[3], "4_", 30, AP_OSD, AP_OSD_Screen),
-
+#endif
     AP_GROUPEND
 };
 
@@ -369,7 +370,7 @@ void AP_OSD::update_stats()
         AP_AHRS &ahrs = AP::ahrs();
         WITH_SEMAPHORE(ahrs.get_semaphore());
         v = ahrs.groundspeed_vector();
-        home_is_set = ahrs.get_position(loc) && ahrs.home_is_set();
+        home_is_set = ahrs.get_location(loc) && ahrs.home_is_set();
         if (home_is_set) {
             home_loc = ahrs.get_home();
         }
@@ -534,6 +535,7 @@ void AP_OSD::set_nav_info(NavInfo &navinfo)
 #endif // OSD_ENABLED
 
 // handle OSD parameter configuration
+#if HAL_GCS_ENABLED
 void AP_OSD::handle_msg(const mavlink_message_t &msg, const GCS_MAVLINK& link)
 {
     bool found = false;
@@ -578,6 +580,7 @@ void AP_OSD::handle_msg(const mavlink_message_t &msg, const GCS_MAVLINK& link)
         break;
     }
 }
+#endif
 
 AP_OSD *AP::osd() {
     return AP_OSD::get_singleton();

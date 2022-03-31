@@ -82,10 +82,17 @@ void ModeAuto::update()
 
         if (plane.landing.is_throttle_suppressed()) {
             // if landing is considered complete throttle is never allowed, regardless of landing type
-            SRV_Channels::set_output_scaled(SRV_Channel::k_throttle, 0);
+            SRV_Channels::set_output_scaled(SRV_Channel::k_throttle, 0.0);
         } else {
             plane.calc_throttle();
         }
+#if AP_SCRIPTING_ENABLED
+    } else if (nav_cmd_id == MAV_CMD_NAV_SCRIPT_TIME) {
+        // NAV_SCRIPTING has a desired roll and pitch rate and desired throttle
+        plane.nav_roll_cd = plane.ahrs.roll_sensor;
+        plane.nav_pitch_cd = plane.ahrs.pitch_sensor;
+        SRV_Channels::set_output_scaled(SRV_Channel::k_throttle, plane.nav_scripting.throttle_pct);
+#endif
     } else {
         // we are doing normal AUTO flight, the special cases
         // are for takeoff and landing
@@ -105,3 +112,19 @@ void ModeAuto::navigate()
     }
 }
 
+
+bool ModeAuto::does_auto_navigation() const
+{
+#if AP_SCRIPTING_ENABLED
+   return (!plane.nav_scripting_active());
+#endif
+   return true;
+}
+
+bool ModeAuto::does_auto_throttle() const
+{
+#if AP_SCRIPTING_ENABLED
+   return (!plane.nav_scripting_active());
+#endif
+   return true;
+}

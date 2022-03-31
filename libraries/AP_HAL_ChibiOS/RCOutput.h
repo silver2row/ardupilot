@@ -26,7 +26,7 @@
 
 #if HAL_USE_PWM == TRUE
 
-#if !STM32_DMA_ADVANCED && !defined(STM32G4)
+#if !STM32_DMA_ADVANCED && !defined(STM32G4) && !defined(STM32L4)
 #define DISABLE_DSHOT
 #endif
 
@@ -200,7 +200,7 @@ public:
      * The mask uses servo channel numbering
      */
     void set_reversed_mask(uint16_t chanmask) override;
-    uint16_t get_reversed_mask() override { return _reversed_mask; }
+    uint16_t get_reversed_mask() override { return _reversed_mask << chan_offset; }
 
     /*
       mark escs as active for the purpose of sending dshot commands
@@ -248,6 +248,11 @@ public:
      */
     void rcout_thread();
 
+    /*
+     timer information
+     */
+    void timer_info(ExpandingString &str) override;
+
 private:
     enum class DshotState {
       IDLE = 0,
@@ -282,6 +287,7 @@ private:
         uint8_t chan[4]; // chan number, zero based, 255 for disabled
         PWMConfig pwm_cfg;
         PWMDriver* pwm_drv;
+        uint8_t timer_id;
         bool have_up_dma; // can we do DMAR outputs for DShot?
         uint8_t dma_up_stream_id;
         uint8_t dma_up_channel;
@@ -294,7 +300,6 @@ private:
 #endif
         uint8_t alt_functions[4];
         ioline_t pal_lines[4];
-
         // below this line is not initialised by hwdef.h
         enum output_mode current_mode;
         uint16_t frequency_hz;
@@ -332,7 +337,7 @@ private:
         // serial output
         struct {
             // expected time per bit
-            uint32_t bit_time_us;
+            uint16_t bit_time_us;
 
             // channel to output to within group (0 to 3)
             uint8_t chan;
@@ -411,7 +416,7 @@ private:
         ioline_t line;
 
         // time the current byte started
-        uint32_t byte_start_tick;
+        uint16_t byte_start_tick;
 
         // number of bits we have read in this byte
         uint8_t nbits;
@@ -423,7 +428,7 @@ private:
         uint16_t byteval;
 
         // expected time per bit in micros
-        uint32_t bit_time_tick;
+        uint16_t bit_time_tick;
 
         // the bit value of the last bit received
         uint8_t last_bit;
@@ -597,10 +602,10 @@ private:
     void dma_cancel(pwm_group& group);
     bool mode_requires_dma(enum output_mode mode) const;
     bool setup_group_DMA(pwm_group &group, uint32_t bitrate, uint32_t bit_width, bool active_high,
-    const uint16_t buffer_length, bool choose_high, uint32_t pulse_time_us);
+                         const uint16_t buffer_length, uint32_t pulse_time_us,
+                         bool is_dshot);
     void send_pulses_DMAR(pwm_group &group, uint32_t buffer_length);
     void set_group_mode(pwm_group &group);
-    static bool is_dshot_protocol(const enum output_mode mode);
     static uint32_t protocol_bitrate(const enum output_mode mode);
     void print_group_setup_error(pwm_group &group, const char* error_string);
 

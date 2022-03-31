@@ -21,12 +21,14 @@
 
  */
 #include <AP_HAL/AP_HAL.h>
+#include <AP_HAL/AP_HAL_Boards.h>
 #include "AP_Periph.h"
 #include <stdio.h>
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
 #include <AP_HAL_ChibiOS/hwdef/common/stm32_util.h>
 #include <AP_HAL_ChibiOS/hwdef/common/watchdog.h>
+#include <AP_HAL_ChibiOS/I2CDevice.h>
 #endif
 
 extern const AP_HAL::HAL &hal;
@@ -92,7 +94,7 @@ void AP_Periph_FW::init()
 
     stm32_watchdog_pat();
 
-#ifdef HAL_NO_GCS
+#if !HAL_GCS_ENABLED
     hal.serial(0)->begin(AP_SERIALMANAGER_CONSOLE_BAUD, 32, 32);
 #endif
     hal.serial(3)->begin(115200, 128, 256);
@@ -103,14 +105,15 @@ void AP_Periph_FW::init()
 
     can_start();
 
-#ifndef HAL_NO_GCS
+#if HAL_GCS_ENABLED
     stm32_watchdog_pat();
     gcs().init();
 #endif
     serial_manager.init();
 
-#ifndef HAL_NO_GCS
+#if HAL_GCS_ENABLED
     gcs().setup_console();
+    gcs().setup_uarts();
     gcs().send_text(MAV_SEVERITY_INFO, "AP_Periph GCS Initialised!");
 #endif
 
@@ -167,7 +170,7 @@ void AP_Periph_FW::init()
 #endif
 
 #ifdef HAL_PERIPH_NEOPIXEL_CHAN_WITHOUT_NOTIFY
-    hal.rcout->set_serial_led_num_LEDs(HAL_PERIPH_NEOPIXEL_CHAN_WITHOUT_NOTIFY, AP_HAL::RCOutput::MODE_NEOPIXEL);
+    hal.rcout->set_serial_led_num_LEDs(HAL_PERIPH_NEOPIXEL_CHAN_WITHOUT_NOTIFY, HAL_PERIPH_NEOPIXEL_COUNT_WITHOUT_NOTIFY, AP_HAL::RCOutput::MODE_NEOPIXEL);
 #endif
 
 #ifdef HAL_PERIPH_ENABLE_RC_OUT
@@ -179,9 +182,24 @@ void AP_Periph_FW::init()
 #endif
 
 #ifdef HAL_PERIPH_ENABLE_AIRSPEED
-    if (airspeed.enabled()) {
+    if (airspeed.enabled()){
+#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
+        const bool pins_enabled = ChibiOS::I2CBus::check_select_pins(0x01);
+        if (pins_enabled) {
+            ChibiOS::I2CBus::set_bus_to_floating(0);
+#ifdef HAL_GPIO_PIN_LED_CAN_I2C
+            palWriteLine(HAL_GPIO_PIN_LED_CAN_I2C, 1);
+#endif
+        } else {
+            // Note: logging of ARSPD is not enabled currently. To enable, call airspeed.set_log_bit(); here
+            airspeed.init();
+        }
+#else
+        // Note: logging of ARSPD is not enabled currently. To enable, call airspeed.set_log_bit(); here
         airspeed.init();
+#endif
     }
+
 #endif
 
 #ifdef HAL_PERIPH_ENABLE_RANGEFINDER
@@ -213,6 +231,9 @@ void AP_Periph_FW::init()
     notify.init();
 #endif
 
+#if AP_SCRIPTING_ENABLED
+    scripting.init();
+#endif
     start_ms = AP_HAL::native_millis();
 }
 
@@ -347,7 +368,7 @@ void AP_Periph_FW::update()
         rcout_init_1Hz();
 #endif
 
-#ifndef HAL_NO_GCS
+#if HAL_GCS_ENABLED
         gcs().send_message(MSG_HEARTBEAT);
         gcs().send_message(MSG_SYS_STATUS);
 #endif    
@@ -363,12 +384,21 @@ void AP_Periph_FW::update()
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS && CH_DBG_ENABLE_STACK_CHECK == TRUE
     static uint32_t last_debug_ms;
-    if (g.debug==1 && now - last_debug_ms > 5000) {
+    if ((g.debug&(1<<DEBUG_SHOW_STACK)) && now - last_debug_ms > 5000) {
         last_debug_ms = now;
         show_stack_free();
     }
 #endif
-    
+
+    if ((g.debug&(1<<DEBUG_AUTOREBOOT)) && AP_HAL::millis() > 15000) {
+        // attempt reboot with HOLD after 15s
+        periph.prepare_reboot();
+#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
+        set_fast_reboot((rtc_boot_magic)(RTC_BOOT_HOLD));
+        NVIC_SystemReset();
+#endif
+    }
+
 #ifdef HAL_PERIPH_ENABLE_BATTERY
     if (now - battery.last_read_ms >= 100) {
         // update battery at 10Hz
@@ -384,7 +414,7 @@ void AP_Periph_FW::update()
 #ifdef HAL_PERIPH_ENABLE_NOTIFY
         notify.update();
 #endif
-#ifndef HAL_NO_GCS
+#if HAL_GCS_ENABLED
         gcs().update_receive();
         gcs().update_send();
 #endif

@@ -33,7 +33,7 @@ void ModeCircle::run()
     pos_control->set_max_speed_accel_z(-get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
 
     // get pilot's desired yaw rate (or zero if in radio failsafe)
-    float target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->get_control_in());
+    float target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->norm_input_dz());
     if (!is_zero(target_yaw_rate)) {
         pilot_yaw_override = true;
     }
@@ -52,7 +52,7 @@ void ModeCircle::run()
         const float radius_new = MAX(radius_current + radius_pilot_change,0);   // new radius target
 
         if (!is_equal(radius_current, radius_new)) {
-            copter.circle_nav->set_radius(radius_new);
+            copter.circle_nav->set_radius_cm(radius_new);
         }
 
         // update the orbicular rate target based on pilot roll stick inputs

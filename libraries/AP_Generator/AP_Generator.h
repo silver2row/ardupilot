@@ -2,14 +2,13 @@
 
 #include <AP_HAL/AP_HAL.h>
 
-#ifndef GENERATOR_ENABLED
-#define GENERATOR_ENABLED !HAL_MINIMIZE_FEATURES && !defined(HAL_BUILD_AP_PERIPH)
+#ifndef HAL_GENERATOR_ENABLED
+#define HAL_GENERATOR_ENABLED !HAL_MINIMIZE_FEATURES && !defined(HAL_BUILD_AP_PERIPH)
 #endif
 
-#if GENERATOR_ENABLED
+#if HAL_GENERATOR_ENABLED
 
 #include <AP_Param/AP_Param.h>
-#include <GCS_MAVLink/GCS.h>
 #include <AP_BattMonitor/AP_BattMonitor.h>
 
 class AP_Generator_Backend;
@@ -62,7 +61,7 @@ public:
     bool idle(void);
     bool run(void);
 
-    void send_generator_status(const GCS_MAVLINK &channel);
+    void send_generator_status(const class GCS_MAVLINK &channel);
 
     // Parameter block
     static const struct AP_Param::GroupInfo var_info[];
@@ -80,6 +79,7 @@ private:
         IE_650_800 = 1,
         IE_2400 = 2,
         RICHENPOWER = 3,
+        // LOWEHEISER = 4,
     };
 
     // Helper to get param and cast to GenType

@@ -109,7 +109,7 @@ const AP_Param::GroupInfo AP_OSD_ParamSetting::var_info[] = {
 
 // at the cost of a little flash, we can create much better ranges and values for certain important settings
 // common labels - all strings must be upper case
-#if APM_BUILD_TYPE(APM_BUILD_ArduPlane) || APM_BUILD_TYPE(APM_BUILD_ArduCopter)
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane) || APM_BUILD_COPTER_OR_HELI
 
 static const char* SERIAL_PROTOCOL_VALUES[] = {
     "", "MAV", "MAV2", "FSKY_D", "FSKY_S", "GPS", "", "ALEX", "STORM", "RNG", 
@@ -182,7 +182,7 @@ const AP_OSD_ParamSetting::ParamMetadata AP_OSD_ParamSetting::_param_metadata[OS
     { 0, 3, 1,   ARRAY_SIZE(FS_LNG_ACTNS), FS_LNG_ACTNS },                      // OSD_PARAM_FAILSAFE_ACTION_2
 };
 
-#elif APM_BUILD_TYPE(APM_BUILD_ArduCopter)
+#elif APM_BUILD_COPTER_OR_HELI
 
 static const char* AUX_OPTIONS[] = {
     "NONE", "", "FLIP", "SIMP", "RTL", "SAV_TRM", "", "SAV_WP", "", "CAM_TRG",
@@ -380,7 +380,7 @@ void AP_OSD_ParamSetting::guess_ranges(bool force)
             float floatp = p->get();
             if (digits < 1) {
                 if (!is_zero(floatp)) {
-                    incr = floatp / 100.0f; // move in 1% increments
+                    incr = floatp * 0.01f; // move in 1% increments
                 } else {
                     incr = 0.01f; // move in absolute 1% increments
                 }
@@ -388,7 +388,7 @@ void AP_OSD_ParamSetting::guess_ranges(bool force)
                 min = 0.0f;
             } else {
                 if (!is_zero(floatp)) {
-                    incr = floatp / 100.0f; // move in 1% increments
+                    incr = floatp * 0.01f; // move in 1% increments
                 } else {
                     incr = MAX(1, powf(10, digits - 2));
                 }

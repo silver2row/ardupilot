@@ -38,6 +38,19 @@
 #define SERIALMANAGER_NUM_PORTS 8
 #endif
 
+/*
+  array size for state[]. This needs to be at least
+  SERIALMANAGER_NUM_PORTS, but we want it to be the same length on
+  similar boards to get the ccache efficiency up. This wastes a small
+  amount of memory, but makes a huge difference to the build times
+ */
+#if SERIALMANAGER_NUM_PORTS > 10 || SERIALMANAGER_NUM_PORTS < 5
+#define SERIALMANAGER_MAX_PORTS SERIALMANAGER_NUM_PORTS
+#else
+#define SERIALMANAGER_MAX_PORTS 10
+#endif
+
+
  // console default baud rates and buffer sizes
 #ifdef HAL_SERIAL0_BAUD_DEFAULT
 # define AP_SERIALMANAGER_CONSOLE_BAUD          HAL_SERIAL0_BAUD_DEFAULT
@@ -125,7 +138,7 @@ public:
         SerialProtocol_Rangefinder = 9,
         SerialProtocol_FrSky_SPort_Passthrough = 10, // FrSky SPort Passthrough (OpenTX) protocol (X-receivers)
         SerialProtocol_Lidar360 = 11,                // Lightware SF40C, TeraRanger Tower or RPLidarA2
-        SerialProtocol_Aerotenna_uLanding      = 12, // Ulanding support - deprecated, users should use Rangefinder
+        SerialProtocol_Aerotenna_USD1      = 12, // USD1 support - deprecated, users should use Rangefinder
         SerialProtocol_Beacon = 13,
         SerialProtocol_Volz = 14,                    // Volz servo protocol
         SerialProtocol_Sbus1 = 15,
@@ -137,7 +150,7 @@ public:
         SerialProtocol_WindVane = 21,
         SerialProtocol_SLCAN = 22,
         SerialProtocol_RCIN = 23,
-        SerialProtocol_EFI_MS = 24,                   // MegaSquirt EFI serial protocol
+        SerialProtocol_EFI = 24,                   // EFI serial protocol
         SerialProtocol_LTM_Telem = 25,
         SerialProtocol_RunCam = 26,
         SerialProtocol_Hott = 27,
@@ -156,6 +169,7 @@ public:
         SerialProtocol_AIS = 40,
         SerialProtocol_CoDevESC = 41,
         SerialProtocol_MSP_DisplayPort = 42,
+        SerialProtocol_MAVLinkHL = 43,
         SerialProtocol_NumProtocols                    // must be the last value
     };
 
@@ -173,8 +187,12 @@ public:
     // find_serial - searches available serial ports that allows the given protocol
     //  instance should be zero if searching for the first instance, 1 for the second, etc
     //  returns uart on success, nullptr if a serial port cannot be found
+    // note that the SERIALn_OPTIONS are applied if the port is found
     AP_HAL::UARTDriver *find_serial(enum SerialProtocol protocol, uint8_t instance) const;
 
+    // have_serial - return true if we have the corresponding serial protocol configured
+    bool have_serial(enum SerialProtocol protocol, uint8_t instance) const;
+    
     // find_baudrate - searches available serial ports for the first instance that allows the given protocol
     //  instance should be zero if searching for the first instance, 1 for the second, etc
     //  returns the baudrate of that protocol on success, 0 if a serial port cannot be found
@@ -219,12 +237,13 @@ public:
 private:
     static AP_SerialManager *_singleton;
 
-    // array of uart info
+    // array of uart info. See comment above about
+    // SERIALMANAGER_MAX_PORTS
     struct UARTState {
-        AP_Int8 protocol;
         AP_Int32 baud;
         AP_Int16 options;
-    } state[SERIALMANAGER_NUM_PORTS];
+        AP_Int8 protocol;
+    } state[SERIALMANAGER_MAX_PORTS];
 
     // pass-through serial support
     AP_Int8 passthru_port1;

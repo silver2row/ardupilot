@@ -17,9 +17,9 @@ public:
     // Constructor
     RC_Channel(void);
 
-    enum ChannelType {
-        RC_CHANNEL_TYPE_ANGLE = 0,
-        RC_CHANNEL_TYPE_RANGE = 1,
+    enum class ControlType {
+        ANGLE = 0,
+        RANGE = 1,
     };
 
     // setup the control preferences
@@ -52,9 +52,10 @@ public:
     // ignores trim and deadzone
     float       norm_input_ignore_trim() const;
 
+    // returns true if input is within deadzone of min
+    bool        in_min_dz() const;
+
     uint8_t     percent_input() const;
-    int16_t     pwm_to_range() const;
-    int16_t     pwm_to_range_dz(uint16_t dead_zone) const;
 
     static const struct AP_Param::GroupInfo var_info[];
 
@@ -71,27 +72,26 @@ public:
     void       set_override(const uint16_t v, const uint32_t timestamp_ms);
     bool       has_override() const;
 
-    int16_t    stick_mixing(const int16_t servo_in);
+    float    stick_mixing(const float servo_in);
 
     // get control input with zero deadzone
     int16_t    get_control_in_zero_dz(void) const;
 
     int16_t    get_radio_min() const {return radio_min.get();}
-    void       set_radio_min(int16_t val) { radio_min = val;}
 
     int16_t    get_radio_max() const {return radio_max.get();}
-    void       set_radio_max(int16_t val) {radio_max = val;}
 
     int16_t    get_radio_trim() const { return radio_trim.get();}
-    void       set_radio_trim(int16_t val) { radio_trim.set(val);}
-    void       save_radio_trim() { radio_trim.save();}
 
     void       set_and_save_trim() { radio_trim.set_and_save_ifchanged(radio_in);}
 
     // set and save trim if changed
     void       set_and_save_radio_trim(int16_t val) { radio_trim.set_and_save_ifchanged(val);}
 
-    ChannelType get_type(void) const { return type_in; }
+    // check if any of the trim/min/max param are configured in storage, this would indicate that the user has done a calibration at somepoint
+    bool       configured_in_storage() { return radio_min.configured_in_storage() || radio_max.configured_in_storage() || radio_trim.configured_in_storage(); }
+
+    ControlType get_type(void) const { return type_in; }
 
     AP_Int16    option; // e.g. activate EPM gripper / enable fence
 
@@ -138,7 +138,7 @@ public:
         AVOID_ADSB =          38, // enable AP_Avoidance library
         PRECISION_LOITER =    39, // enable precision loiter
         AVOID_PROXIMITY =     40, // enable object avoidance using proximity sensors (ie. horizontal lidar)
-        ARMDISARM =           41, // arm or disarm vehicle
+        ARMDISARM_UNUSED =    41, // UNUSED
         SMART_RTL =           42, // change to SmartRTL flight mode
         INVERTED  =           43, // enable inverted flight
         WINCH_ENABLE =        44, // winch enable/disable
@@ -207,13 +207,24 @@ public:
         EKF_YAW_RESET =      104, // trigger yaw reset attempt
         GPS_DISABLE_YAW =    105, // disable GPS yaw for testing
         DISABLE_AIRSPEED_USE = 106, // equivalent to AIRSPEED_USE 0
+        FW_AUTOTUNE =          107, // fixed wing auto tune
+        QRTL =               108, // QRTL mode
         // if you add something here, make sure to update the documentation of the parameter in RC_Channel.cpp!
         // also, if you add an option >255, you will need to fix duplicate_options_exist
 
         // options 150-199 continue user rc switch options
-        CRUISE =             150,  ///CRUISE mode
+        CRUISE =             150,  // CRUISE mode
         TURTLE =             151,  // Turtle mode - flip over after crash
         SIMPLE_HEADING_RESET = 152, // reset simple mode refernce heading to current
+        ARMDISARM =          153, // arm or disarm vehicle
+        ARMDISARM_AIRMODE =  154, // arm or disarm vehicle enabling airmode
+        TRIM_TO_CURRENT_SERVO_RC = 155, // trim to current servo and RC
+        TORQEEDO_CLEAR_ERR = 156, // clear torqeedo error
+        EMERGENCY_LANDING_EN = 157, //Force long FS action to FBWA for landing out of range
+        OPTFLOW_CAL =        158, // optical flow calibration
+        FORCEFLYING =        159, // enable or disable land detection for GPS based manual modes preventing land detection and maintainting set_throttle_mix_max
+        WEATHER_VANE_ENABLE = 160, // enable/disable weathervaning
+        TURBINE_START =       161, // initialize turbine start sequence
 
         // inputs from 200 will eventually used to replace RCMAP
         ROLL =               201, // roll input
@@ -254,8 +265,6 @@ public:
         SCRIPTING,
     };
 
-    bool read_3pos_switch(AuxSwitchPos &ret) const WARN_IF_UNUSED;
-    bool read_6pos_switch(int8_t& position) WARN_IF_UNUSED;
     AuxSwitchPos get_aux_switch_pos() const;
 
     // wrapper function around do_aux_function which allows us to log
@@ -265,7 +274,7 @@ public:
     const char *string_for_aux_function(AUX_FUNC function) const;
 #endif
     // pwm value under which we consider that Radio value is invalid
-    static const uint16_t RC_MIN_LIMIT_PWM = 900;
+    static const uint16_t RC_MIN_LIMIT_PWM = 800;
     // pwm value above which we consider that Radio value is invalid
     static const uint16_t RC_MAX_LIMIT_PWM = 2200;
 
@@ -291,7 +300,7 @@ protected:
     // virtual function to be overridden my subclasses
     virtual bool do_aux_function(aux_func_t ch_option, AuxSwitchPos);
 
-    virtual void do_aux_function_armdisarm(const AuxSwitchPos ch_flag);
+    void do_aux_function_armdisarm(const AuxSwitchPos ch_flag);
     void do_aux_function_avoid_adsb(const AuxSwitchPos ch_flag);
     void do_aux_function_avoid_proximity(const AuxSwitchPos ch_flag);
     void do_aux_function_camera_trigger(const AuxSwitchPos ch_flag);
@@ -328,7 +337,7 @@ private:
     AP_Int8     reversed;
     AP_Int16    dead_zone;
 
-    ChannelType type_in;
+    ControlType type_in;
     int16_t     high_in;
 
     // the input channel this corresponds to
@@ -340,6 +349,12 @@ private:
 
     int16_t pwm_to_angle() const;
     int16_t pwm_to_angle_dz(uint16_t dead_zone) const;
+
+    int16_t pwm_to_range() const;
+    int16_t pwm_to_range_dz(uint16_t dead_zone) const;
+
+    bool read_3pos_switch(AuxSwitchPos &ret) const WARN_IF_UNUSED;
+    bool read_6pos_switch(int8_t& position) WARN_IF_UNUSED;
 
     // Structure used to detect and debounce switch changes
     struct {
@@ -424,6 +439,7 @@ public:
     class RC_Channel *find_channel_for_option(const RC_Channel::aux_func_t option);
     bool duplicate_options_exist();
     RC_Channel::AuxSwitchPos get_channel_pos(const uint8_t rcmapchan) const;
+    void convert_options(const RC_Channel::aux_func_t old_option, const RC_Channel::aux_func_t new_option);
 
     void init_aux_all();
     void read_aux_all();
@@ -489,7 +505,13 @@ public:
         return get_singleton() != nullptr && (_options & uint32_t(Option::SUPPRESS_CRSF_MESSAGE));
     }
 
+    bool multiple_receiver_support() const {
+        return _options & uint32_t(Option::MULTI_RECEIVER_SUPPORT);
+    }
 
+    bool use_crsf_lq_as_rssi(void) const {
+        return get_singleton() != nullptr && (_options & uint32_t(Option::USE_CRSF_LQ_AS_RSSI)) != 0;
+    }
 
     // returns true if overrides should time out.  If true is returned
     // then returned_timeout_ms will contain the timeout in
@@ -536,6 +558,10 @@ public:
     // flight_mode_channel_number must be overridden in vehicle specific code
     virtual int8_t flight_mode_channel_number() const = 0;
 
+    // set and get calibrating flag, stops arming if true
+    void calibrating(bool b) { gcs_is_calibrating = b; }
+    bool calibrating() { return gcs_is_calibrating; }
+
 protected:
 
     enum class Option {
@@ -549,6 +575,8 @@ protected:
         ALLOW_SWITCH_REV        = (1U << 7), // honor the reversed flag on switches
         CRSF_CUSTOM_TELEMETRY   = (1U << 8), // use passthrough data for crsf telemetry
         SUPPRESS_CRSF_MESSAGE   = (1U << 9), // suppress CRSF mode/rate message for ELRS systems
+        MULTI_RECEIVER_SUPPORT  = (1U << 10), // allow multiple receivers
+        USE_CRSF_LQ_AS_RSSI     = (1U << 11), // returns CRSF link quality as RSSI value, instead of RSSI
     };
 
     void new_override_received() {
@@ -572,6 +600,9 @@ private:
 
     // Allow override by default at start
     bool _gcs_overrides_enabled = true;
+
+    // true if GCS is performing a RC calibration
+    bool gcs_is_calibrating;
 };
 
 RC_Channels &rc();

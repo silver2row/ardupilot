@@ -40,6 +40,7 @@
 #include <uavcan/equipment/safety/ArmingStatus.hpp>
 #include <ardupilot/indication/SafetyState.hpp>
 #include <ardupilot/indication/Button.hpp>
+#include <ardupilot/indication/NotifyState.hpp>
 #include <ardupilot/equipment/trafficmonitor/TrafficReport.hpp>
 #include <uavcan/equipment/gnss/RTCMStream.hpp>
 #include <uavcan/protocol/debug/LogMessage.hpp>
@@ -60,6 +61,29 @@
 #define LED_DELAY_US 50000
 
 extern const AP_HAL::HAL& hal;
+
+#ifndef UAVCAN_NODE_POOL_SIZE
+#if HAL_CANFD_SUPPORTED
+#define UAVCAN_NODE_POOL_SIZE 16384
+#else
+#define UAVCAN_NODE_POOL_SIZE 8192
+#endif
+#endif
+
+#if HAL_CANFD_SUPPORTED
+#define UAVCAN_STACK_SIZE     8192
+#else
+#define UAVCAN_STACK_SIZE     4096
+#endif
+
+
+#ifndef UAVCAN_NODE_POOL_BLOCK_SIZE
+#if HAL_CANFD_SUPPORTED
+#define UAVCAN_NODE_POOL_BLOCK_SIZE 128
+#else
+#define UAVCAN_NODE_POOL_BLOCK_SIZE 64
+#endif
+#endif
 
 #define debug_uavcan(level_debug, fmt, args...) do { AP::can().log_text(level_debug, "UAVCAN", fmt, ##args); } while (0)
 
@@ -102,10 +126,18 @@ const AP_Param::GroupInfo AP_UAVCAN::var_info[] = {
     // @Param: OPTION
     // @DisplayName: UAVCAN options
     // @Description: Option flags
-    // @Bitmask: 0:ClearDNADatabase,1:IgnoreDNANodeConflicts
+    // @Bitmask: 0:ClearDNADatabase,1:IgnoreDNANodeConflicts,2:EnableCanfd
     // @User: Advanced
     AP_GROUPINFO("OPTION", 5, AP_UAVCAN, _options, 0),
     
+    // @Param: NTF_RT
+    // @DisplayName: Notify State rate
+    // @Description: Maximum transmit rate for Notify State Message
+    // @Range: 1 200
+    // @Units: Hz
+    // @User: Advanced
+    AP_GROUPINFO("NTF_RT", 6, AP_UAVCAN, _notify_state_hz, 20),
+
     AP_GROUPEND
 };
 
@@ -121,6 +153,7 @@ static uavcan::Publisher<uavcan::equipment::indication::BeepCommand>* buzzer[HAL
 static uavcan::Publisher<ardupilot::indication::SafetyState>* safety_state[HAL_MAX_CAN_PROTOCOL_DRIVERS];
 static uavcan::Publisher<uavcan::equipment::safety::ArmingStatus>* arming_status[HAL_MAX_CAN_PROTOCOL_DRIVERS];
 static uavcan::Publisher<uavcan::equipment::gnss::RTCMStream>* rtcm_stream[HAL_MAX_CAN_PROTOCOL_DRIVERS];
+static uavcan::Publisher<ardupilot::indication::NotifyState>* notify_state[HAL_MAX_CAN_PROTOCOL_DRIVERS];
 
 // Clients
 UC_CLIENT_CALL_REGISTRY_BINDER(ParamGetSetCb, uavcan::protocol::param::GetSet);
@@ -154,9 +187,10 @@ static uavcan::Subscriber<uavcan::equipment::esc::Status, ESCStatusCb> *esc_stat
 UC_REGISTRY_BINDER(DebugCb, uavcan::protocol::debug::LogMessage);
 static uavcan::Subscriber<uavcan::protocol::debug::LogMessage, DebugCb> *debug_listener[HAL_MAX_CAN_PROTOCOL_DRIVERS];
 
+static uavcan::PoolAllocator<UAVCAN_NODE_POOL_SIZE, UAVCAN_NODE_POOL_BLOCK_SIZE, AP_UAVCAN::RaiiSynchronizer> _node_allocator[HAL_MAX_CAN_PROTOCOL_DRIVERS];
 
-AP_UAVCAN::AP_UAVCAN() :
-    _node_allocator()
+
+AP_UAVCAN::AP_UAVCAN()
 {
     AP_Param::setup_object_defaults(this, var_info);
 
@@ -215,7 +249,7 @@ void AP_UAVCAN::init(uint8_t driver_index, bool enable_filters)
         return;
     }
 
-    _node = new uavcan::Node<0>(*_iface_mgr, uavcan::SystemClock::instance(), _node_allocator);
+    _node = new uavcan::Node<0>(*_iface_mgr, uavcan::SystemClock::instance(), _node_allocator[driver_index]);
 
     if (_node == nullptr) {
         debug_uavcan(AP_CANManager::LOG_ERROR, "UAVCAN: couldn't allocate node\n\r");
@@ -261,6 +295,13 @@ void AP_UAVCAN::init(uint8_t driver_index, bool enable_filters)
         }
         _node->setHardwareVersion(hw_version);
     }
+
+#if UAVCAN_SUPPORT_CANFD
+    if (option_is_set(Options::CANFD_ENABLED)) {
+        _node->enableCanFd();
+    }
+#endif
+
     int start_res = _node->start();
     if (start_res < 0) {
         debug_uavcan(AP_CANManager::LOG_ERROR, "UAVCAN: node start problem, error %d\n\r", start_res);
@@ -280,7 +321,9 @@ void AP_UAVCAN::init(uint8_t driver_index, bool enable_filters)
     AP_Baro_UAVCAN::subscribe_msgs(this);
     AP_BattMonitor_UAVCAN::subscribe_msgs(this);
     AP_Airspeed_UAVCAN::subscribe_msgs(this);
+#if AP_OPTICALFLOW_HEREFLOW_ENABLED
     AP_OpticalFlow_HereFlow::subscribe_msgs(this);
+#endif
     AP_RangeFinder_UAVCAN::subscribe_msgs(this);
 
     act_out_array[driver_index] = new uavcan::Publisher<uavcan::equipment::actuator::ArrayCommand>(*_node);
@@ -310,7 +353,11 @@ void AP_UAVCAN::init(uint8_t driver_index, bool enable_filters)
     rtcm_stream[driver_index] = new uavcan::Publisher<uavcan::equipment::gnss::RTCMStream>(*_node);
     rtcm_stream[driver_index]->setTxTimeout(uavcan::MonotonicDuration::fromMSec(20));
     rtcm_stream[driver_index]->setPriority(uavcan::TransferPriority::OneHigherThanLowest);
-    
+
+    notify_state[driver_index] = new uavcan::Publisher<ardupilot::indication::NotifyState>(*_node);
+    notify_state[driver_index]->setTxTimeout(uavcan::MonotonicDuration::fromMSec(20));
+    notify_state[driver_index]->setPriority(uavcan::TransferPriority::OneHigherThanLowest);
+
     param_get_set_client[driver_index] = new uavcan::ServiceClient<uavcan::protocol::param::GetSet, ParamGetSetCb>(*_node, ParamGetSetCb(this, &AP_UAVCAN::handle_param_get_set_response));
 
     param_execute_opcode_client[driver_index] = new uavcan::ServiceClient<uavcan::protocol::param::ExecuteOpcode, ParamExecuteOpcodeCb>(*_node, ParamExecuteOpcodeCb(this, &AP_UAVCAN::handle_param_save_response));
@@ -341,9 +388,6 @@ void AP_UAVCAN::init(uint8_t driver_index, bool enable_filters)
     }
     
     _led_conf.devices_count = 0;
-    if (enable_filters) {
-        configureCanAcceptanceFilters(*_node);
-    }
 
     /*
      * Informing other nodes that we're ready to work.
@@ -356,7 +400,7 @@ void AP_UAVCAN::init(uint8_t driver_index, bool enable_filters)
 
     snprintf(_thread_name, sizeof(_thread_name), "uavcan_%u", driver_index);
 
-    if (!hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_UAVCAN::loop, void), _thread_name, 4096, AP_HAL::Scheduler::PRIORITY_CAN, 0)) {
+    if (!hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_UAVCAN::loop, void), _thread_name, UAVCAN_STACK_SIZE, AP_HAL::Scheduler::PRIORITY_CAN, 0)) {
         _node->setModeOfflineAndPublish();
         debug_uavcan(AP_CANManager::LOG_ERROR, "UAVCAN: couldn't create thread\n\r");
         return;
@@ -413,6 +457,7 @@ void AP_UAVCAN::loop(void)
         buzzer_send();
         rtcm_stream_send();
         safety_state_send();
+        notify_state_send();
         send_parameter_request();
         send_parameter_save_request();
         AP::uavcan_dna_server().verify_nodes(this);
@@ -519,9 +564,9 @@ void AP_UAVCAN::SRV_push_servos()
 {
     WITH_SEMAPHORE(SRV_sem);
 
-    for (uint8_t i = 0; i < NUM_SERVO_CHANNELS; i++) {
+    for (uint8_t i = 0; i < UAVCAN_SRV_NUMBER; i++) {
         // Check if this channels has any function assigned
-        if (SRV_Channels::channel_function(i)) {
+        if (SRV_Channels::channel_function(i) > SRV_Channel::k_none) {
             _SRV_conf[i].pulse = SRV_Channels::srv_channel(i)->get_output_pwm();
             _SRV_conf[i].esc_pending = true;
             _SRV_conf[i].servo_pending = true;
@@ -623,6 +668,94 @@ void AP_UAVCAN::set_buzzer_tone(float frequency, float duration_s)
     _buzzer.pending_mask = 0xFF;
 }
 
+// notify state send
+void AP_UAVCAN::notify_state_send()
+{
+    uint32_t now = AP_HAL::native_millis();
+
+    if (_notify_state_hz == 0 || (now - _last_notify_state_ms) < uint32_t(1000 / _notify_state_hz)) {
+        return;
+    }
+
+    ardupilot::indication::NotifyState msg;
+    msg.vehicle_state = 0;
+    if (AP_Notify::flags.initialising) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_INITIALISING;
+    }
+    if (AP_Notify::flags.armed) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_ARMED;
+    }
+    if (AP_Notify::flags.flying) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_FLYING;
+    }
+    if (AP_Notify::flags.compass_cal_running) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_MAGCAL_RUN;
+    }
+    if (AP_Notify::flags.ekf_bad) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_EKF_BAD;
+    }
+    if (AP_Notify::flags.esc_calibration) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_ESC_CALIBRATION;
+    }
+    if (AP_Notify::flags.failsafe_battery) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_FAILSAFE_BATT;
+    }
+    if (AP_Notify::flags.failsafe_gcs) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_FAILSAFE_GCS;
+    }
+    if (AP_Notify::flags.failsafe_radio) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_FAILSAFE_RADIO;
+    }
+    if (AP_Notify::flags.firmware_update) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_FW_UPDATE;
+    }
+    if (AP_Notify::flags.gps_fusion) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_GPS_FUSION;
+    }
+    if (AP_Notify::flags.gps_glitching) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_GPS_GLITCH;
+    }
+    if (AP_Notify::flags.have_pos_abs) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_POS_ABS_AVAIL;
+    }
+    if (AP_Notify::flags.leak_detected) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_LEAK_DET;
+    }
+    if (AP_Notify::flags.parachute_release) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_CHUTE_RELEASED;
+    }
+    if (AP_Notify::flags.powering_off) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_POWERING_OFF;
+    }
+    if (AP_Notify::flags.pre_arm_check) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_PREARM;
+    }
+    if (AP_Notify::flags.pre_arm_gps_check) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_PREARM_GPS;
+    }
+    if (AP_Notify::flags.save_trim) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_SAVE_TRIM;
+    }
+    if (AP_Notify::flags.vehicle_lost) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_LOST;
+    }
+    if (AP_Notify::flags.video_recording) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_VIDEO_RECORDING;
+    }
+    if (AP_Notify::flags.waiting_for_throw) {
+        msg.vehicle_state |= 1 << ardupilot::indication::NotifyState::VEHICLE_STATE_THROW_READY;
+    }
+
+    msg.aux_data_type = ardupilot::indication::NotifyState::VEHICLE_YAW_EARTH_CENTIDEGREES;
+    uint16_t yaw_cd = (uint16_t)(360.0f - degrees(AP::ahrs().get_yaw()))*100.0f;
+    const uint8_t *data = (uint8_t *)&yaw_cd;
+    for (uint8_t i=0; i<2; i++) {
+        msg.aux_data.push_back(data[i]);
+    }
+    notify_state[_driver_index]->broadcast(msg);
+    _last_notify_state_ms = AP_HAL::native_millis();
+}
+
 void AP_UAVCAN::rtcm_stream_send()
 {
     WITH_SEMAPHORE(_rtcm_stream.sem);
@@ -681,7 +814,7 @@ void AP_UAVCAN::safety_state_send()
 
     { // handle ArmingStatus
         uavcan::equipment::safety::ArmingStatus arming_msg;
-        arming_msg.status = AP::arming().is_armed() ? uavcan::equipment::safety::ArmingStatus::STATUS_FULLY_ARMED :
+        arming_msg.status = hal.util->get_soft_armed() ? uavcan::equipment::safety::ArmingStatus::STATUS_FULLY_ARMED :
                                                       uavcan::equipment::safety::ArmingStatus::STATUS_DISARMED;
         arming_status[_driver_index]->broadcast(arming_msg);
     }
@@ -820,7 +953,7 @@ void AP_UAVCAN::handle_ESC_status(AP_UAVCAN* ap_uavcan, uint8_t node_id, const E
     }
 
     TelemetryData t {
-        .temperature_cdeg = int16_t((cb.msg->temperature - C_TO_KELVIN) * 100),
+        .temperature_cdeg = int16_t((KELVIN_TO_C(cb.msg->temperature)) * 100),
         .voltage = cb.msg->voltage,
         .current = cb.msg->current,
     };

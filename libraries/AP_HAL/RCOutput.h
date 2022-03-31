@@ -31,6 +31,8 @@
 
 class ByteBuffer;
 
+class ExpandingString;
+
 class AP_HAL::RCOutput {
 public:
     virtual void init() = 0;
@@ -186,7 +188,9 @@ public:
     
     /*
       output modes. Allows for support of PWM, oneshot and dshot 
-     */
+    */
+    // this enum is used by BLH_OTYPE and ESC_PWM_TYPE on AP_Periph
+    // double check params are still correct when changing
     enum output_mode {
         MODE_PWM_NONE,
         MODE_PWM_NORMAL,
@@ -200,6 +204,10 @@ public:
         MODE_NEOPIXEL,  // same as MODE_PWM_DSHOT at 800kHz but it's an LED
         MODE_PROFILED,  // same as MODE_PWM_DSHOT using separate clock and data
     };
+    // true when the output mode is of type dshot
+    // static to allow use in the ChibiOS thread stuff
+    static bool is_dshot_protocol(const enum output_mode mode);
+
 
     // https://github.com/bitdump/BLHeli/blob/master/BLHeli_32%20ARM/BLHeli_32%20Firmware%20specs/Digital_Cmd_Spec.txt
     enum BLHeliDshotCommand : uint8_t {
@@ -303,6 +311,13 @@ public:
       trigger send of serial led
      */
     virtual void serial_led_send(const uint16_t chan) {}
+
+    virtual void timer_info(ExpandingString &str) {}
+
+    /*
+     * calculate the prescaler required to achieve the desire bitrate
+     */
+    static uint32_t calculate_bitrate_prescaler(uint32_t timer_clock, uint32_t target_frequency, bool is_dshot);
 
 protected:
 

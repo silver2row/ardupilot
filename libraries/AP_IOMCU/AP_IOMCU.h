@@ -9,9 +9,11 @@
 
 #if HAL_WITH_IO_MCU
 
-#include "ch.h"
 #include "iofirmware/ioprotocol.h"
 #include <AP_RCMapper/AP_RCMapper.h>
+
+typedef uint32_t eventmask_t;
+typedef struct ch_thread thread_t;
 
 class AP_IOMCU {
 public:
@@ -74,14 +76,14 @@ public:
     }
     
     /*
-      get servo rail voltage
+      get servo rail voltage adc counts
      */
-    float get_vservo(void) const { return reg_status.vservo * 0.001; }
+    uint16_t get_vservo_adc_count(void) const { return reg_status.vservo; }
 
     /*
-      get rssi voltage
+      get rssi voltage adc counts
      */
-    float get_vrssi(void) const { return reg_status.vrssi * 0.001; }
+    uint16_t get_vrssi_adc_count(void) const { return reg_status.vrssi; }
 
     // set target for IMU heater
     void set_heater_duty_cycle(uint8_t duty_cycle);
@@ -104,6 +106,21 @@ public:
     // setup for FMU failsafe mixing
     bool setup_mixing(RCMapper *rcmap, int8_t override_chan,
                       float mixing_gain, uint16_t manual_rc_mask);
+
+    // Check if pin number is valid for GPIO
+    bool valid_GPIO_pin(uint8_t pin) const;
+
+    // convert external pin numbers 101 to 108 to internal 0 to 7
+    bool convert_pin_number(uint8_t& pin) const;
+
+    // set GPIO mask of channels setup for output
+    void set_GPIO_mask(uint8_t mask);
+
+    // write to a output pin
+    void write_GPIO(uint8_t pin, bool value);
+
+    // toggle a output pin
+    void toggle_GPIO(uint8_t pin);
 
     // channel group masks
     const uint8_t ch_masks[3] = { 0x03,0x0C,0xF0 };
@@ -201,6 +218,8 @@ private:
         bool oneshot_enabled;
         bool brushed_enabled;
     } rate;
+
+    struct page_GPIO GPIO;
 
     // IMU heater duty cycle
     uint8_t heater_duty_cycle;
