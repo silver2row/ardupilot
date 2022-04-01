@@ -29,7 +29,7 @@ while getopts "yq" opt; do
     esac
 done
 
-APT_GET="sudo apt-get"
+APT_GET="sudo apt"
 if $ASSUME_YES; then
     APT_GET="$APT_GET --assume-yes"
 fi
@@ -59,8 +59,8 @@ fi
 
 # Checking Ubuntu release to adapt software version to install
 RELEASE_CODENAME=$(lsb_release -c -s)
-PYTHON_V="python"  # starting from ubuntu 20.04, python isn't symlink to default python interpreter
-PIP=pip2
+PYTHON_V="python3"  # starting from ubuntu 20.04, python isn't symlink to default python interpreter
+PIP=pip3
 
 if [ ${RELEASE_CODENAME} == 'xenial' ]; then
     SITLFML_VERSION="2.3v5"
@@ -84,7 +84,7 @@ elif [ ${RELEASE_CODENAME} == 'jammy' ]; then
 elif [ ${RELEASE_CODENAME} == 'groovy' ] ||
          [ ${RELEASE_CODENAME} == 'hirsute' ] ||
          [ ${RELEASE_CODENAME} == 'bullseye' ] ||
-         [ ${RELEASE_CODENAME} == 'impish' ]; then
+         [ ${RELEASE_CODENAME} == 'bullseye' ]; then
     SITLFML_VERSION="2.5"
     SITLCFML_VERSION="2.5"
     PYTHON_V="python3"
@@ -207,7 +207,7 @@ then
 elif [ ${RELEASE_CODENAME} == 'groovy' ] ||
          [ ${RELEASE_CODENAME} == 'hirsute' ] ||
          [ ${RELEASE_CODENAME} == 'bullseye' ] ||
-         [ ${RELEASE_CODENAME} == 'jammy' ] ||
+         [ ${RELEASE_CODENAME} == 'bullseye' ] ||
          [ ${RELEASE_CODENAME} == 'impish' ]; then
     BASE_PKGS+=" python-is-python3"
     SITL_PKGS+=" libpython3-stdlib" # for argparse
@@ -239,7 +239,7 @@ if [[ $SKIP_AP_GRAPHIC_ENV -ne 1 ]]; then
          [ ${RELEASE_CODENAME} == 'hirsute' ] ||
          [ ${RELEASE_CODENAME} == 'focal' ] ||
          [ ${RELEASE_CODENAME} == 'ulyssa' ] ||
-         [ ${RELEASE_CODENAME} == 'jammy' ] ||
+         [ ${RELEASE_CODENAME} == 'bullseye' ] ||
          [ ${RELEASE_CODENAME} == 'impish' ]; then
     SITL_PKGS+=" python3-wxgtk4.0"
     SITL_PKGS+=" fonts-freefont-ttf libfreetype6-dev libpng16-16 libportmidi-dev libsdl-image1.2-dev libsdl-mixer1.2-dev libsdl-ttf2.0-dev libsdl1.2-dev"  # for pygame
