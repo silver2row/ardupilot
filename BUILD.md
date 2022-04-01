@@ -124,8 +124,12 @@ list some basic and more used commands as example.
     IP will change according to the board used):
 
     ```sh
-    ./waf configure --board navio2 --rsync-dest root@192.168.1.2:/
-    ./waf --target bin/arducopter --upload
+    # Look in /ardupilot/Tools/environment_install/ for a file called: install_prereqs_ubuntu.sh
+    # This file will help you build your env. for the debian distro.
+    # Do not allow the STM toolchain to be built and "Y" to the rest of the commands is helpful.
+    python3 waf configure --board=blue --rsync-dest debian@192.168.7.2:/home/debian
+    python3 ../../waf --target bin/arducopter --upload
+    # This second command goes in the /ardupilot/build/blue/ dir.
     ```
 
     This allows to set a destination to which the `--upload` option will upload
