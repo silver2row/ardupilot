@@ -45,8 +45,7 @@ public:
                update_flight_stage_fn_t _update_flight_stage_fn);
 
     /* Do not allow copies */
-    AP_Landing(const AP_Landing &other) = delete;
-    AP_Landing &operator=(const AP_Landing&) = delete;
+    CLASS_NO_COPY(AP_Landing);
 
 
     // NOTE: make sure to update is_type_valid()
@@ -109,7 +108,7 @@ public:
     void set_initial_slope(void) { initial_slope = slope; }
     bool is_expecting_impact(void) const;
     void Log(void) const;
-    const AP_Logger::PID_Info * get_pid_info(void) const;
+    const AP_PIDInfo * get_pid_info(void) const;
 
     // landing altitude offset (meters)
     float alt_offset;

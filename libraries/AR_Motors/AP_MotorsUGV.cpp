@@ -454,16 +454,6 @@ bool AP_MotorsUGV::output_test_pwm(motor_test_order motor_seq, float pwm)
 //  returns true if checks pass, false if they fail.  report should be true to send text messages to GCS
 bool AP_MotorsUGV::pre_arm_check(bool report) const
 {
-    // check if both regular and skid steering functions have been defined
-    if (SRV_Channels::function_assigned(SRV_Channel::k_throttleLeft) &&
-        SRV_Channels::function_assigned(SRV_Channel::k_throttleRight) &&
-        SRV_Channels::function_assigned(SRV_Channel::k_throttle) &&
-        SRV_Channels::function_assigned(SRV_Channel::k_steering)) {
-        if (report) {
-            gcs().send_text(MAV_SEVERITY_CRITICAL, "PreArm: regular AND skid steering configured");
-        }
-        return false;
-    }
     // check if only one of skid-steering output has been configured
     if (SRV_Channels::function_assigned(SRV_Channel::k_throttleLeft) != SRV_Channels::function_assigned(SRV_Channel::k_throttleRight)) {
         if (report) {
@@ -494,15 +484,17 @@ bool AP_MotorsUGV::pre_arm_check(bool report) const
 // sanity check parameters
 void AP_MotorsUGV::sanity_check_parameters()
 {
-    _throttle_min = constrain_int16(_throttle_min, 0, 20);
-    _throttle_max = constrain_int16(_throttle_max, 30, 100);
-    _vector_angle_max = constrain_float(_vector_angle_max, 0.0f, 90.0f);
+    _throttle_min.set(constrain_int16(_throttle_min, 0, 20));
+    _throttle_max.set(constrain_int16(_throttle_max, 30, 100));
+    _vector_angle_max.set(constrain_float(_vector_angle_max, 0.0f, 90.0f));
 }
 
 // setup pwm output type
 void AP_MotorsUGV::setup_pwm_type()
 {
     _motor_mask = 0;
+
+    hal.rcout->set_dshot_esc_type(SRV_Channels::get_dshot_esc_type());
 
     // work out mask of channels assigned to motors
     _motor_mask |= SRV_Channels::get_output_channel_mask(SRV_Channel::k_throttle);

@@ -17,6 +17,7 @@
 #include <AP_HAL/AP_HAL.h>
 #include <SRV_Channel/SRV_Channel.h>
 #include <GCS_MAVLink/GCS.h>
+#include <AP_Notify/AP_Notify.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -124,6 +125,7 @@ void AP_Motors::rc_set_freq(uint32_t motor_mask, uint16_t freq_hz)
 
     const uint32_t mask = motor_mask_to_srv_channel_mask(motor_mask);
     hal.rcout->set_freq(mask, freq_hz);
+    hal.rcout->set_dshot_esc_type(SRV_Channels::get_dshot_esc_type());
 
     switch (pwm_type(_pwm_type.get())) {
     case PWM_TYPE_ONESHOT:
@@ -195,12 +197,8 @@ void AP_Motors::add_motor_num(int8_t motor_num)
 {
     // ensure valid motor number is provided
     if (motor_num >= 0 && motor_num < AP_MOTORS_MAX_NUM_MOTORS) {
-        uint8_t chan;
         SRV_Channel::Aux_servo_function_t function = SRV_Channels::get_motor_function(motor_num);
         SRV_Channels::set_aux_channel_default(function, motor_num);
-        if (!SRV_Channels::find_channel(function, chan)) {
-            gcs().send_text(MAV_SEVERITY_ERROR, "Motors: no SERVOx_FUNCTION set to Motor%u", motor_num + 1);
-        }
     }
 }
 
@@ -264,6 +262,16 @@ void AP_Motors::output_test_seq(uint8_t motor_seq, int16_t pwm)
     if (armed() && _interlock) {
         _output_test_seq(motor_seq, pwm);
     }
+}
+
+bool AP_Motors::arming_checks(size_t buflen, char *buffer) const
+{
+    if (!initialised_ok()) {
+        hal.util->snprintf(buffer, buflen, "Check frame class and type");
+        return false;
+    }
+
+    return true;
 }
 
 namespace AP {

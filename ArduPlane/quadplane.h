@@ -11,13 +11,14 @@
 #include <AP_Motors/AP_Motors.h>
 #include <AC_PID/AC_PID.h>
 #include <AC_AttitudeControl/AC_AttitudeControl_Multi.h> // Attitude control library
+#include <AC_AttitudeControl/AC_CommandModel.h>
 #include <AP_InertialNav/AP_InertialNav.h>
 #include <AC_AttitudeControl/AC_PosControl.h>
 #include <AC_AttitudeControl/AC_WeatherVane.h>
 #include <AC_WPNav/AC_WPNav.h>
 #include <AC_WPNav/AC_Loiter.h>
-#include <AC_Fence/AC_Fence.h>
 #include <AC_Avoidance/AC_Avoid.h>
+#include <AP_Logger/LogStructure.h>
 #include <AP_Proximity/AP_Proximity.h>
 #include "qautotune.h"
 #include "defines.h"
@@ -167,6 +168,9 @@ public:
     // called when we change mode (for any mode, not just Q modes)
     void mode_enter(void);
 
+    // Check if servo auto trim is allowed
+    bool allow_servo_auto_trim();
+
 private:
     AP_AHRS &ahrs;
     AP_Vehicle::MultiCopter aparm;
@@ -194,6 +198,13 @@ private:
 
     // air mode state: OFF, ON, ASSISTED_FLIGHT_ONLY
     AirMode air_mode;
+
+    // Command model parameter class
+    // Default max rate, default expo, default time constant
+    AC_CommandModel command_model_pilot{100.0, 0.25, 0.25};
+    // helper functions to set and disable time constant from command model
+    void set_pilot_yaw_rate_time_constant();
+    void disable_yaw_rate_time_constant();
 
     // return true if airmode should be active
     bool air_mode_active() const;
@@ -318,9 +329,6 @@ private:
     uint32_t alt_error_start_ms;
     bool in_alt_assist;
 
-    // maximum yaw rate in degrees/second
-    AP_Float yaw_rate_max;
-
     // landing speed in cm/s
     AP_Int16 land_speed_cms;
 
@@ -402,6 +410,30 @@ private:
     // are we in a guided takeoff?
     bool guided_takeoff:1;
 
+    /* if we arm in guided mode when we arm then go into a "waiting
+       for takeoff command" state. In this state we are waiting for
+       one of the following:
+
+       1) disarm
+       2) guided takeoff command
+       3) change to AUTO with a takeoff waypoint as first nav waypoint
+       4) change to another mode
+
+       while in this state we don't go to throttle unlimited, and will
+       refuse a change to AUTO mode if the first waypoint is not a
+       takeoff. If we try to switch to RTL then we will instead use
+       QLAND
+
+       This state is needed to cope with the takeoff sequence used
+       by QGC on common controllers such as the MX16, which do this on a "takeoff" swipe:
+
+          - changes mode to GUIDED
+          - arms
+          - changes mode to AUTO
+    */
+    bool guided_wait_takeoff;
+    bool guided_wait_takeoff_on_mode_enter;
+
     struct {
         // time when motors reached lower limit
         uint32_t lower_limit_start_ms;
@@ -454,6 +486,7 @@ private:
         float target_speed;
         float target_accel;
         uint32_t last_pos_reset_ms;
+        bool overshoot;
     private:
         uint32_t last_state_change_ms;
         enum position_control_state state;
@@ -502,28 +535,32 @@ private:
 
     // additional options
     AP_Int32 options;
-    enum {
-        OPTION_LEVEL_TRANSITION=(1<<0),
-        OPTION_ALLOW_FW_TAKEOFF=(1<<1),
-        OPTION_ALLOW_FW_LAND=(1<<2),
-        OPTION_RESPECT_TAKEOFF_FRAME=(1<<3),
-        OPTION_MISSION_LAND_FW_APPROACH=(1<<4),
-        OPTION_FS_QRTL=(1<<5),
-        OPTION_IDLE_GOV_MANUAL=(1<<6),
-        OPTION_Q_ASSIST_FORCE_ENABLE=(1<<7),
-        OPTION_TAILSIT_Q_ASSIST_MOTORS_ONLY=(1<<8),
-        OPTION_AIRMODE_UNUSED=(1<<9),
-        OPTION_DISARMED_TILT=(1<<10),
-        OPTION_DELAY_ARMING=(1<<11),
-        OPTION_DISABLE_SYNTHETIC_AIRSPEED_ASSIST=(1<<12),
-        OPTION_DISABLE_GROUND_EFFECT_COMP=(1<<13),
-        OPTION_INGORE_FW_ANGLE_LIMITS_IN_Q_MODES=(1<<14),
-        OPTION_THR_LANDING_CONTROL=(1<<15),
-        OPTION_DISABLE_APPROACH=(1<<16),
-        OPTION_REPOSITION_LANDING=(1<<17),
-        OPTION_ONLY_ARM_IN_QMODE_OR_AUTO=(1<<18),
-        OPTION_TRANS_FAIL_TO_FW=(1<<19),
+    enum class OPTION {
+        LEVEL_TRANSITION=(1<<0),
+        ALLOW_FW_TAKEOFF=(1<<1),
+        ALLOW_FW_LAND=(1<<2),
+        RESPECT_TAKEOFF_FRAME=(1<<3),
+        MISSION_LAND_FW_APPROACH=(1<<4),
+        FS_QRTL=(1<<5),
+        IDLE_GOV_MANUAL=(1<<6),
+        Q_ASSIST_FORCE_ENABLE=(1<<7),
+        TAILSIT_Q_ASSIST_MOTORS_ONLY=(1<<8),
+        AIRMODE_UNUSED=(1<<9),
+        DISARMED_TILT=(1<<10),
+        DELAY_ARMING=(1<<11),
+        DISABLE_SYNTHETIC_AIRSPEED_ASSIST=(1<<12),
+        DISABLE_GROUND_EFFECT_COMP=(1<<13),
+        INGORE_FW_ANGLE_LIMITS_IN_Q_MODES=(1<<14),
+        THR_LANDING_CONTROL=(1<<15),
+        DISABLE_APPROACH=(1<<16),
+        REPOSITION_LANDING=(1<<17),
+        ONLY_ARM_IN_QMODE_OR_AUTO=(1<<18),
+        TRANS_FAIL_TO_FW=(1<<19),
+        FS_RTL=(1<<20),
     };
+    bool option_is_set(OPTION option) const {
+        return (options.get() & int32_t(option)) != 0;
+    }
 
     AP_Float takeoff_failure_scalar;
     AP_Float maximum_takeoff_airspeed;
@@ -532,6 +569,10 @@ private:
 
     float last_land_final_agl;
 
+    // min alt for navigation in takeoff
+    AP_Float takeoff_navalt_min;
+    uint32_t takeoff_last_run_ms;
+    float takeoff_start_alt;
 
     // oneshot with duration ARMING_DELAY_MS used by quadplane to delay spoolup after arming:
     // ignored unless OPTION_DELAY_ARMING or OPTION_TILT_DISARMED is set
@@ -581,7 +622,10 @@ private:
       are we in the airbrake phase of a VTOL landing?
      */
     bool in_vtol_airbrake(void) const;
-    
+
+    // returns true if the vehicle should currently be doing a spiral landing
+    bool landing_with_fixed_wing_spiral_approach(void) const;
+
     // Q assist state, can be enabled, disabled or force. Default to enabled
     Q_ASSIST_STATE_ENUM q_assist_state = Q_ASSIST_STATE_ENUM::Q_ASSIST_ENABLED;
 

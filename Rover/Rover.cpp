@@ -82,7 +82,6 @@ const AP_Scheduler::Task Rover::scheduler_tasks[] = {
     SCHED_TASK_CLASS(AP_Proximity,        &rover.g2.proximity,     update,         50,  200,  27),
 #endif
     SCHED_TASK_CLASS(AP_WindVane,         &rover.g2.windvane,      update,         20,  100,  30),
-    SCHED_TASK_CLASS(AC_Fence,            &rover.g2.fence,         update,         10,  100,  33),
     SCHED_TASK(update_wheel_encoder,   50,    200,  36),
     SCHED_TASK(update_compass,         10,    200,  39),
     SCHED_TASK(update_logging1,        10,    200,  45),
@@ -93,14 +92,19 @@ const AP_Scheduler::Task Rover::scheduler_tasks[] = {
     SCHED_TASK_CLASS(RC_Channels,         (RC_Channels*)&rover.g2.rc_channels, read_aux_all,           10,    200,  60),
     SCHED_TASK_CLASS(AP_BattMonitor,      &rover.battery,          read,           10,  300,  63),
     SCHED_TASK_CLASS(AP_ServoRelayEvents, &rover.ServoRelayEvents, update_events,  50,  200,  66),
-#if GRIPPER_ENABLED == ENABLED
+#if AP_GRIPPER_ENABLED
     SCHED_TASK_CLASS(AP_Gripper,          &rover.g2.gripper,       update,         10,   75,  69),
+#if PRECISION_LANDING == ENABLED
+    SCHED_TASK(update_precland,      400,     50,  70),
 #endif
+#endif
+#if AP_RPM_ENABLED
     SCHED_TASK_CLASS(AP_RPM,              &rover.rpm_sensor,       update,         10,  100,  72),
+#endif
 #if HAL_MOUNT_ENABLED
     SCHED_TASK_CLASS(AP_Mount,            &rover.camera_mount,     update,         50,  200,  75),
 #endif
-#if CAMERA == ENABLED
+#if AP_CAMERA_ENABLED
     SCHED_TASK_CLASS(AP_Camera,           &rover.camera,           update,         50,  200,  78),
 #endif
     SCHED_TASK(gcs_failsafe_check,     10,    200,  81),
@@ -112,7 +116,6 @@ const AP_Scheduler::Task Rover::scheduler_tasks[] = {
 #if HAL_SPRAYER_ENABLED
     SCHED_TASK_CLASS(AC_Sprayer,          &rover.g2.sprayer,       update,          3,  90,  99),
 #endif
-    SCHED_TASK_CLASS(Compass,             &rover.compass,          cal_update,     50, 200, 102),
     SCHED_TASK(compass_save,            0.1,  200, 105),
 #if LOGGING_ENABLED == ENABLED
     SCHED_TASK_CLASS(AP_Logger,           &rover.logger,           periodic_tasks, 50,  300, 108),
@@ -129,9 +132,6 @@ const AP_Scheduler::Task Rover::scheduler_tasks[] = {
     SCHED_TASK(cruise_learn_update,    50,    200, 126),
 #if ADVANCED_FAILSAFE == ENABLED
     SCHED_TASK(afs_fs_check,           10,    200, 129),
-#endif
-#if HAL_AIS_ENABLED
-    SCHED_TASK_CLASS(AP_AIS, &rover.g2.ais, update, 5, 100, 135),
 #endif
 };
 
@@ -212,6 +212,12 @@ bool Rover::set_desired_turn_rate_and_speed(float turn_rate, float speed)
     // set turn rate and speed. Turn rate is expected in centidegrees/s and speed in meters/s
     mode_guided.set_desired_turn_rate_and_speed(turn_rate * 100.0f, speed);
     return true;
+}
+
+// set desired nav speed (m/s). Used for scripting.
+bool Rover::set_desired_speed(float speed)
+{
+    return control_mode->set_desired_speed(speed);
 }
 
 // get control output (for use in scripting)
@@ -366,7 +372,7 @@ void Rover::update_logging1(void)
 
     if (should_log(MASK_LOG_THR)) {
         Log_Write_Throttle();
-        logger.Write_Beacon(g2.beacon);
+        g2.beacon.log();
     }
 
     if (should_log(MASK_LOG_NTUN)) {
@@ -380,7 +386,7 @@ void Rover::update_logging1(void)
 
 #if HAL_PROXIMITY_ENABLED
     if (should_log(MASK_LOG_RANGEFINDER)) {
-        logger.Write_Proximity(g2.proximity);
+        g2.proximity.log();
     }
 #endif
 }
@@ -410,9 +416,6 @@ void Rover::update_logging2(void)
  */
 void Rover::one_second_loop(void)
 {
-    // allow orientation change at runtime to aid config
-    ahrs.update_orientation();
-
     set_control_channels();
 
     // cope with changes to aux functions

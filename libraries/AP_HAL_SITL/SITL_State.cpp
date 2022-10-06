@@ -236,6 +236,12 @@ SITL::SerialDevice *SITL_State::create_serial_sim(const char *name, const char *
         }
         benewake_tfmini = new SITL::RF_Benewake_TFmini();
         return benewake_tfmini;
+    } else if (streq(name, "teraranger_serial")) {
+        if (teraranger_serial != nullptr) {
+            AP_HAL::panic("Only one teraranger_serial at a time");
+        }
+        teraranger_serial = new SITL::RF_TeraRanger_Serial();
+        return teraranger_serial;
     } else if (streq(name, "lightwareserial")) {
         if (lightwareserial != nullptr) {
             AP_HAL::panic("Only one lightwareserial at a time");
@@ -434,6 +440,22 @@ bool SITL_State::_read_rc_sitl_input()
     } pwm_pkt;
 
     const ssize_t size = _sitl_rc_in.recv(&pwm_pkt, sizeof(pwm_pkt), 0);
+
+    // if we are simulating no pulses RC failure, do not update pwm_input
+    if (_sitl->rc_fail == SITL::SIM::SITL_RCFail_NoPulses) {
+        return size != -1; // we must continue to drain _sitl_rc
+    }
+
+    if (_sitl->rc_fail == SITL::SIM::SITL_RCFail_Throttle950) {
+        // discard anything we just read from the "receiver" and set
+        // values to bind values:
+        for (uint8_t i=0; i<ARRAY_SIZE(pwm_input); i++) {
+            pwm_input[0] = 1500;  // centre all inputs
+        }
+        pwm_input[2] = 950;  // reset throttle (assumed to be on channel 3...)
+        return size != -1;  // we must continue to drain _sitl_rc
+    }
+
     switch (size) {
     case -1:
         return false;
@@ -448,15 +470,6 @@ bool SITL_State::_read_rc_sitl_input()
             }
             uint16_t pwm = pwm_pkt.pwm[i];
             if (pwm != 0) {
-                if (_sitl->rc_fail == SITL::SIM::SITL_RCFail_Throttle950) {
-                    if (i == 2) {
-                        // set throttle (assumed to be on channel 3...)
-                        pwm = 950;
-                    } else {
-                        // centre all other inputs
-                        pwm = 1500;
-                    }
-                }
                 pwm_input[i] = pwm;
             }
         }
@@ -566,6 +579,9 @@ void SITL_State::_fdm_input_local(void)
     }
     if (benewake_tfmini != nullptr) {
         benewake_tfmini->update(sitl_model->rangefinder_range());
+    }
+    if (teraranger_serial != nullptr) {
+        teraranger_serial->update(sitl_model->rangefinder_range());
     }
     if (lightwareserial != nullptr) {
         lightwareserial->update(sitl_model->rangefinder_range());
@@ -697,6 +713,10 @@ void SITL_State::_simulator_servos(struct sitl_input &input)
         }
         if (_vehicle == Rover) {
             pwm_output[0] = pwm_output[1] = pwm_output[2] = pwm_output[3] = 1500;
+        }
+        if (_vehicle == ArduSub) {
+            pwm_output[0] = pwm_output[1] = pwm_output[2] = pwm_output[3] =
+                    pwm_output[4] = pwm_output[5] = pwm_output[6] = pwm_output[7] = 1500;
         }
     }
 
@@ -860,11 +880,11 @@ void SITL_State::_simulator_servos(struct sitl_input &input)
     }
 
     // assume 3DR power brick
-    voltage_pin_value = ((voltage / 10.1f) / 5.0f) * 1024;
-    current_pin_value = ((_current / 17.0f) / 5.0f) * 1024;
+    voltage_pin_value = float_to_uint16(((voltage / 10.1f) / 5.0f) * 1024);
+    current_pin_value = float_to_uint16(((_current / 17.0f) / 5.0f) * 1024);
     // fake battery2 as just a 25% gain on the first one
-    voltage2_pin_value = ((voltage * 0.25f / 10.1f) / 5.0f) * 1024;
-    current2_pin_value = ((_current * 0.25f / 17.0f) / 5.0f) * 1024;
+    voltage2_pin_value = float_to_uint16(((voltage * 0.25f / 10.1f) / 5.0f) * 1024);
+    current2_pin_value = float_to_uint16(((_current * 0.25f / 17.0f) / 5.0f) * 1024);
 }
 
 void SITL_State::init(int argc, char * const argv[])

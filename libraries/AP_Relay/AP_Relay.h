@@ -20,8 +20,7 @@ public:
     AP_Relay();
 
     /* Do not allow copies */
-    AP_Relay(const AP_Relay &other) = delete;
-    AP_Relay &operator=(const AP_Relay&) = delete;
+    CLASS_NO_COPY(AP_Relay);
 
     // setup the relay pin
     void        init();
@@ -50,6 +49,9 @@ private:
 
     AP_Int8 _pin[AP_RELAY_NUM_RELAYS];
     AP_Int8 _default;
+    uint8_t _pin_states;
+    uint8_t _last_logged_pin_states;
+    uint32_t _last_log_ms;
 
     void set(uint8_t instance, bool value);
 };

@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include <AP_HAL/AP_HAL_Boards.h>
 
-#include "AP_Filesystem_Available.h"
+#include "AP_Filesystem_config.h"
 
 #ifndef MAX_NAME_LEN
 #define MAX_NAME_LEN 255
@@ -34,6 +34,7 @@
 #endif
 #define DT_REG 0
 #define DT_DIR 1
+#define DT_LNK 10
 
 struct dirent {
    char    d_name[MAX_NAME_LEN]; /* filename */

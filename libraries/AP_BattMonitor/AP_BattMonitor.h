@@ -31,8 +31,16 @@
 #define AP_BATTMON_SMBUS_ENABLE 1
 #endif
 
-#ifndef AP_BATTMON_FUEL_ENABLE
-#define AP_BATTMON_FUEL_ENABLE 1
+#ifndef AP_BATTMON_FUELFLOW_ENABLE
+#define AP_BATTMON_FUELFLOW_ENABLE (BOARD_FLASH_SIZE > 1024)
+#endif
+
+#ifndef AP_BATTMON_FUELLEVEL_PWM_ENABLE
+#define AP_BATTMON_FUELLEVEL_PWM_ENABLE (BOARD_FLASH_SIZE > 1024)
+#endif
+
+#ifndef AP_BATTMON_FUELLEVEL_ANALOG_ENABLE
+#define AP_BATTMON_FUELLEVEL_ANALOG_ENABLE (BOARD_FLASH_SIZE > 1024)
 #endif
 
 // declare backend class
@@ -48,6 +56,7 @@ class AP_BattMonitor_Generator;
 class AP_BattMonitor_INA2XX;
 class AP_BattMonitor_LTC2946;
 class AP_BattMonitor_Torqeedo;
+class AP_BattMonitor_FuelLevel_Analog;
 
 class AP_BattMonitor
 {
@@ -67,6 +76,7 @@ class AP_BattMonitor
     friend class AP_BattMonitor_LTC2946;
 
     friend class AP_BattMonitor_Torqeedo;
+    friend class AP_BattMonitor_FuelLevel_Analog;
 
 public:
 
@@ -101,6 +111,7 @@ public:
         INA2XX                     = 21,
         LTC2946                    = 22,
         Torqeedo                   = 23,
+        FuelLevel_Analog           = 24,
     };
 
     FUNCTOR_TYPEDEF(battery_failsafe_handler_fn_t, void, const char *, const int8_t);
@@ -108,8 +119,7 @@ public:
     AP_BattMonitor(uint32_t log_battery_bit, battery_failsafe_handler_fn_t battery_failsafe_handler_fn, const int8_t *failsafe_priorities);
 
     /* Do not allow copies */
-    AP_BattMonitor(const AP_BattMonitor &other) = delete;
-    AP_BattMonitor &operator=(const AP_BattMonitor&) = delete;
+    CLASS_NO_COPY(AP_BattMonitor);
 
     static AP_BattMonitor *get_singleton() {
         return _singleton;
@@ -156,7 +166,9 @@ public:
 
     // healthy - returns true if monitor is functioning
     bool healthy(uint8_t instance) const;
-    bool healthy() const { return healthy(AP_BATT_PRIMARY_INSTANCE); }
+
+    // return true if all configured battery monitors are healthy
+    bool healthy() const;
 
     /// voltage - returns battery voltage in volts
     float voltage(uint8_t instance) const;

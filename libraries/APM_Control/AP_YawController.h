@@ -2,7 +2,6 @@
 
 #include <AP_Common/AP_Common.h>
 #include <AP_Vehicle/AP_Vehicle.h>
-#include <AP_Logger/AP_Logger.h>
 #include <AC_PID/AC_PID.h>
 #include "AP_AutoTune.h"
 
@@ -12,8 +11,10 @@ public:
     AP_YawController(const AP_Vehicle::FixedWing &parms);
 
     /* Do not allow copies */
-    AP_YawController(const AP_YawController &other) = delete;
-    AP_YawController &operator=(const AP_YawController&) = delete;
+    CLASS_NO_COPY(AP_YawController);
+
+    // return true if rate control or damping is enabled
+    bool enabled() const { return rate_control_enabled() || (_K_D > 0.0); } 
 
     // return true if rate control is enabled
     bool rate_control_enabled(void) const { return _rate_enable != 0; }
@@ -27,6 +28,8 @@ public:
 
     void reset_I();
 
+    void reset_rate_PID();
+
     /*
       reduce the integrator, used when we have a low scale factor in a quadplane hover
     */
@@ -36,7 +39,7 @@ public:
         _pid_info.I *= 0.995f;
     }
 
-    const AP_Logger::PID_Info& get_pid_info(void) const
+    const AP_PIDInfo& get_pid_info(void) const
     {
         return _pid_info;
     }
@@ -44,6 +47,7 @@ public:
     // start/stop auto tuner
     void autotune_start(void);
     void autotune_restore(void);
+    
 
     static const struct AP_Param::GroupInfo var_info[];
 
@@ -69,5 +73,5 @@ private:
     AP_AutoTune *autotune;
     bool failed_autotune_alloc;
     
-    AP_Logger::PID_Info _pid_info;
+    AP_PIDInfo _pid_info;
 };

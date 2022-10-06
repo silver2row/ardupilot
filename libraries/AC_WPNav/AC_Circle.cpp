@@ -3,6 +3,8 @@
 #include <AP_Terrain/AP_Terrain.h>
 #include "AC_Circle.h"
 
+#include <AP_Logger/AP_Logger.h>
+
 extern const AP_HAL::HAL& hal;
 
 const AP_Param::GroupInfo AC_Circle::var_info[] = {
@@ -133,7 +135,7 @@ void AC_Circle::set_center(const Location& center)
 void AC_Circle::set_rate(float deg_per_sec)
 {
     if (!is_equal(deg_per_sec, _rate.get())) {
-        _rate = deg_per_sec;
+        _rate.set(deg_per_sec);
     }
 }
 

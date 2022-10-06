@@ -222,11 +222,13 @@ bool AP_Frsky_SPort_Passthrough::is_packet_ready(uint8_t idx, bool queue_empty)
     case RPM:
         {
             packet_ready = false;
+#if AP_RPM_ENABLED
             const AP_RPM *rpm = AP::rpm();
             if (rpm == nullptr) {
                 break;
             }
             packet_ready = rpm->num_sensors() > 0;
+#endif
         }
         break;
     case TERRAIN:
@@ -582,12 +584,14 @@ uint32_t AP_Frsky_SPort_Passthrough::calc_ap_status(void)
     ap_status |= (uint8_t)(AP_Notify::flags.ekf_bad)<<AP_EKF_FS_OFFSET;
     // generic failsafe
     ap_status |= (uint8_t)(AP_Notify::flags.failsafe_battery||AP_Notify::flags.failsafe_ekf||AP_Notify::flags.failsafe_gcs||AP_Notify::flags.failsafe_radio)<<AP_FS_OFFSET;
+#if AP_FENCE_ENABLED
     // fence status
     AC_Fence *fence = AP::fence();
     if (fence != nullptr) {
         ap_status |= (uint8_t)(fence->enabled() && fence->present()) << AP_FENCE_PRESENT_OFFSET;
         ap_status |= (uint8_t)(fence->get_breaches()>0) << AP_FENCE_BREACH_OFFSET;
     }
+#endif
     // signed throttle [-100,100] scaled down to [-63,63] on 7 bits, MSB for sign + 6 bits for 0-63
     ap_status |= prep_number(gcs().get_hud_throttle()*0.63, 2, 0)<<AP_THROTTLE_OFFSET;
     // IMU temperature
@@ -695,6 +699,7 @@ uint32_t AP_Frsky_SPort_Passthrough::calc_attiandrng(void)
  */
 uint32_t AP_Frsky_SPort_Passthrough::calc_rpm(void)
 {
+#if AP_RPM_ENABLED
     const AP_RPM *ap_rpm = AP::rpm();
     if (ap_rpm == nullptr) {
         return 0;
@@ -711,6 +716,9 @@ uint32_t AP_Frsky_SPort_Passthrough::calc_rpm(void)
         value |= (int16_t)roundf(rpm * 0.1) << 16;
     }
     return value;
+#else
+    return 0;
+#endif
 }
 
 /*

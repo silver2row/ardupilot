@@ -1,4 +1,3 @@
-#include "mode.h"
 #include "Rover.h"
 
 #define AUTO_GUIDED_SEND_TARGET_MS 1000
@@ -481,13 +480,15 @@ bool ModeAuto::start_command(const AP_Mission::Mission_Command& cmd)
         break;
 
     case MAV_CMD_DO_FENCE_ENABLE:
+#if AP_FENCE_ENABLED
         if (cmd.p1 == 0) {  //disable
-            g2.fence.enable(false);
+            rover.fence.enable(false);
             gcs().send_text(MAV_SEVERITY_INFO, "Fence Disabled");
         } else {  //enable fence
-            g2.fence.enable(true);
+            rover.fence.enable(true);
             gcs().send_text(MAV_SEVERITY_INFO, "Fence Enabled");
         }
+#endif
         break;
 
     case MAV_CMD_DO_GUIDED_LIMITS:

@@ -179,12 +179,32 @@ inline int16_t constrain_int16(const int16_t amt, const int16_t low, const int16
     return constrain_value(amt, low, high);
 }
 
+inline uint16_t constrain_uint16(const uint16_t amt, const uint16_t low, const uint16_t high)
+{
+    return constrain_value(amt, low, high);
+}
+
 inline int32_t constrain_int32(const int32_t amt, const int32_t low, const int32_t high)
 {
     return constrain_value(amt, low, high);
 }
 
+inline uint32_t constrain_uint32(const uint32_t amt, const uint32_t low, const uint32_t high)
+{
+    return constrain_value(amt, low, high);
+}
+
 inline int64_t constrain_int64(const int64_t amt, const int64_t low, const int64_t high)
+{
+    return constrain_value(amt, low, high);
+}
+
+inline uint64_t constrain_uint64(const uint64_t amt, const uint64_t low, const uint64_t high)
+{
+    return constrain_value(amt, low, high);
+}
+
+inline double constrain_double(const double amt, const double low, const double high)
 {
     return constrain_value(amt, low, high);
 }
@@ -344,4 +364,14 @@ float fixedwing_turn_rate(float bank_angle_deg, float airspeed);
 
 // convert degrees farenheight to Kelvin
 float degF_to_Kelvin(float temp_f);
+
+/*
+  conversion functions to prevent undefined behaviour
+ */
+int16_t float_to_int16(const float v);
+uint16_t float_to_uint16(const float v);
+int32_t float_to_int32(const float v);
+uint32_t float_to_uint32(const float v);
+uint32_t double_to_uint32(const double v);
+int32_t double_to_int32(const double v);
 

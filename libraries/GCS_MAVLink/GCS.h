@@ -3,11 +3,7 @@
 // protocols.
 #pragma once
 
-#include <AP_HAL/AP_HAL_Boards.h>
-
-#ifndef HAL_GCS_ENABLED
-#define HAL_GCS_ENABLED 1
-#endif
+#include "GCS_config.h"
 
 #if HAL_GCS_ENABLED
 
@@ -21,9 +17,12 @@
 #include <AP_Common/Bitmask.h>
 #include <AP_LTM_Telem/AP_LTM_Telem.h>
 #include <AP_Devo_Telem/AP_Devo_Telem.h>
-#include <AP_Filesystem/AP_Filesystem_Available.h>
+#include <AP_Filesystem/AP_Filesystem_config.h>
 #include <AP_GPS/AP_GPS.h>
 #include <AP_OpticalFlow/AP_OpticalFlow.h>
+#include <AP_OpenDroneID/AP_OpenDroneID.h>
+#include <AP_Mount/AP_Mount.h>
+#include <AC_Fence/AC_Fence.h>
 
 #include "ap_message.h"
 
@@ -39,7 +38,7 @@
 
 // macros used to determine if a message will fit in the space available.
 
-void gcs_out_of_space_to_send_count(mavlink_channel_t chan);
+void gcs_out_of_space_to_send(mavlink_channel_t chan);
 
 // important note: despite the names, these messages do NOT check to
 // see if the payload will fit in the buffer.  They check to see if
@@ -56,14 +55,14 @@ void gcs_out_of_space_to_send_count(mavlink_channel_t chan);
 // anywhere in the code to determine if the mavlink message with ID id
 // can currently fit in the output of _chan.  Note the use of the ","
 // operator here to increment a counter.
-#define HAVE_PAYLOAD_SPACE(_chan, id) (comm_get_txspace(_chan) >= PAYLOAD_SIZE(_chan, id) ? true : (gcs_out_of_space_to_send_count(_chan), false))
+#define HAVE_PAYLOAD_SPACE(_chan, id) (comm_get_txspace(_chan) >= PAYLOAD_SIZE(_chan, id) ? true : (gcs_out_of_space_to_send(_chan), false))
 
 // CHECK_PAYLOAD_SIZE - macro which may only be used within a
 // GCS_MAVLink object's methods.  It inserts code which will
 // immediately return false from the current function if there is no
 // room to fit the mavlink message with id id on the current object's
 // output
-#define CHECK_PAYLOAD_SIZE(id) if (txspace() < unsigned(packet_overhead()+MAVLINK_MSG_ID_ ## id ## _LEN)) { gcs_out_of_space_to_send_count(chan); return false; }
+#define CHECK_PAYLOAD_SIZE(id) if (txspace() < unsigned(packet_overhead()+MAVLINK_MSG_ID_ ## id ## _LEN)) { gcs_out_of_space_to_send(chan); return false; }
 
 // CHECK_PAYLOAD_SIZE2 - macro which inserts code which will
 // immediately return false from the current function if there is no
@@ -71,6 +70,12 @@ void gcs_out_of_space_to_send_count(mavlink_channel_t chan);
 // channel "chan".  It is expecting there to be a "chan" variable in
 // scope.
 #define CHECK_PAYLOAD_SIZE2(id) if (!HAVE_PAYLOAD_SPACE(chan, id)) return false
+
+// CHECK_PAYLOAD_SIZE2_VOID - macro which inserts code which will
+// immediately return from the current (void) function if there is no
+// room to fit the mavlink message with id id on the mavlink output
+// channel "chan".
+#define CHECK_PAYLOAD_SIZE2_VOID(chan, id) if (!HAVE_PAYLOAD_SPACE(chan, id)) return
 
 // convenience macros for defining which ap_message ids are in which streams:
 #define MAV_STREAM_ENTRY(stream_name)           \
@@ -167,14 +172,13 @@ public:
     void send_mission_ack(const mavlink_message_t &msg,
                           MAV_MISSION_TYPE mission_type,
                           MAV_MISSION_RESULT result) const {
+        CHECK_PAYLOAD_SIZE2_VOID(chan, MISSION_ACK);
         mavlink_msg_mission_ack_send(chan,
                                      msg.sysid,
                                      msg.compid,
                                      result,
                                      mission_type);
     }
-
-    static const MAV_MISSION_TYPE supported_mission_types[3];
 
     // packetReceived is called on any successful decode of a mavlink message
     virtual void packetReceived(const mavlink_status_t &status,
@@ -296,9 +300,8 @@ public:
     void send_local_position() const;
     void send_vfr_hud();
     void send_vibration() const;
-    void send_mount_status() const;
+    void send_gimbal_device_attitude_status() const;
     void send_named_float(const char *name, float value) const;
-    void send_gimbal_report() const;
     void send_home_position() const;
     void send_gps_global_origin() const;
     virtual void send_attitude_target() {};
@@ -319,6 +322,7 @@ public:
     void send_high_latency2() const;
 #endif // HAL_HIGH_LATENCY2_ENABLED
     void send_uavionix_adsb_out_status() const;
+    void send_autopilot_state_for_gimbal_device() const;
 
     // lock a channel, preventing use by MAVLink
     void lock(bool _lock) {
@@ -372,6 +376,12 @@ public:
       returns if a matching component is found
      */
     static bool find_by_mavtype(uint8_t mav_type, uint8_t &sysid, uint8_t &compid, mavlink_channel_t &channel) { return routing.find_by_mavtype(mav_type, sysid, compid, channel); }
+
+    /*
+      search for the first vehicle or component in the routing table with given mav_type and component id and retrieve its sysid and channel
+      returns true if a match is found
+     */
+    static bool find_by_mavtype_and_compid(uint8_t mav_type, uint8_t compid, uint8_t &sysid, mavlink_channel_t &channel) { return routing.find_by_mavtype_and_compid(mav_type, compid, sysid, channel); }
 
     // update signing timestamp on GPS lock
     static void update_signing_timestamp(uint64_t timestamp_usec);
@@ -475,7 +485,9 @@ protected:
     void handle_common_rally_message(const mavlink_message_t &msg);
     void handle_rally_fetch_point(const mavlink_message_t &msg);
     void handle_rally_point(const mavlink_message_t &msg) const;
+#if HAL_MOUNT_ENABLED
     virtual void handle_mount_message(const mavlink_message_t &msg);
+#endif
     void handle_fence_message(const mavlink_message_t &msg);
     void handle_param_value(const mavlink_message_t &msg);
     void handle_radio_status(const mavlink_message_t &msg, bool log_radio);
@@ -485,7 +497,7 @@ protected:
     void handle_common_message(const mavlink_message_t &msg);
     void handle_set_gps_global_origin(const mavlink_message_t &msg);
     void handle_setup_signing(const mavlink_message_t &msg) const;
-    virtual MAV_RESULT handle_preflight_reboot(const mavlink_command_long_t &packet);
+    virtual MAV_RESULT handle_preflight_reboot(const mavlink_command_long_t &packet, const mavlink_message_t &msg);
 
     // reset a message interval via mavlink:
     MAV_RESULT handle_command_set_message_interval(const mavlink_command_long_t &packet);
@@ -636,6 +648,8 @@ protected:
 
 private:
 
+    const AP_SerialManager::UARTState *uartstate;
+
     // last time we got a non-zero RSSI from RADIO_STATUS
     static struct LastRadioStatus {
         uint32_t remrssi_ms;
@@ -644,6 +658,8 @@ private:
     } last_radio_status;
 
     void log_mavlink_stats();
+
+    uint32_t last_accel_cal_ms; // used to rate limit accel cals for bad links
 
     MAV_RESULT _set_mode_common(const MAV_MODE base_mode, const uint32_t custom_mode);
 
@@ -1056,9 +1072,12 @@ public:
                               ap_var_type param_type,
                               float param_value);
 
-    static class MissionItemProtocol_Waypoints *_missionitemprotocol_waypoints;
-    static class MissionItemProtocol_Rally *_missionitemprotocol_rally;
-    static class MissionItemProtocol_Fence *_missionitemprotocol_fence;
+    // an array of objects used to handle each of the different
+    // protocol types we support.  This is indexed by the enumeration
+    // MAV_MISSION_TYPE, taking advantage of the fact that fence,
+    // mission and rally have values 0, 1 and 2.  Indexing should be via
+    // get_prot_for_mission_type to do bounds checking.
+    static class MissionItemProtocol *missionitemprotocols[3];
     class MissionItemProtocol *get_prot_for_mission_type(const MAV_MISSION_TYPE mission_type) const;
     void try_send_queued_message_for_type(MAV_MISSION_TYPE type) const;
 
@@ -1082,7 +1101,7 @@ public:
     // frsky backend
     class AP_Frsky_Telem *frsky;
 
-#if !HAL_MINIMIZE_FEATURES
+#if AP_LTM_TELEM_ENABLED
     // LTM backend
     AP_LTM_Telem ltm_telemetry;
 #endif

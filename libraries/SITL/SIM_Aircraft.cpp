@@ -408,6 +408,8 @@ void Aircraft::fill_fdm(struct sitl_fdm &fdm)
     fdm.wind_vane_apparent.direction = wind_vane_apparent.direction;
     fdm.wind_vane_apparent.speed = wind_vane_apparent.speed;
 
+    fdm.wind_ef = wind_ef;
+
     if (is_smoothed) {
         fdm.xAccel = smoothing.accel_body.x;
         fdm.yAccel = smoothing.accel_body.y;
@@ -445,7 +447,7 @@ void Aircraft::fill_fdm(struct sitl_fdm &fdm)
 
     // in the first call here, if a speedup option is specified, overwrite it
     if (is_equal(last_speedup, -1.0f) && !is_equal(get_speedup(), 1.0f)) {
-        sitl->speedup = get_speedup();
+        sitl->speedup.set(get_speedup());
     }
     
     if (!is_equal(last_speedup, float(sitl->speedup)) && sitl->speedup > 0) {
@@ -483,11 +485,19 @@ void Aircraft::fill_fdm(struct sitl_fdm &fdm)
 // is bouncing off:
 float Aircraft::perpendicular_distance_to_rangefinder_surface() const
 {
-    return sitl->height_agl;
+    switch ((Rotation)sitl->sonar_rot.get()) {
+    case Rotation::ROTATION_PITCH_270:
+        return sitl->height_agl;
+    case ROTATION_NONE ... ROTATION_YAW_315:
+        return sitl->measure_distance_at_angle_bf(location, sitl->sonar_rot.get()*45);
+    default:
+        AP_BoardConfig::config_error("Bad simulated sonar rotation");
+    }
 }
 
 float Aircraft::rangefinder_range() const
 {
+
     float roll = sitl->state.rollDeg;
     float pitch = sitl->state.pitchDeg;
 
@@ -524,6 +534,7 @@ float Aircraft::rangefinder_range() const
     // sensor position offset in body frame
     const Vector3f relPosSensorBF = sitl->rngfnd_pos_offset;
 
+    // n.b. the following code is assuming rotation-pitch-270:
     // adjust altitude for position of the sensor on the vehicle if position offset is non-zero
     if (!relPosSensorBF.is_zero()) {
         // get a rotation matrix following DCM conventions (body to earth)
@@ -941,6 +952,13 @@ void Aircraft::update_external_payload(const struct sitl_input &input)
         external_payload_mass += sprayer->payload_mass();
     }
 
+    {
+        const float range = rangefinder_range();
+        for (uint8_t i=0; i<RANGEFINDER_MAX_INSTANCES; i++) {
+            rangefinder_m[i] = range;
+        }
+    }
+
     // update i2c
     if (i2c) {
         i2c->update(*this);
@@ -971,7 +989,7 @@ void Aircraft::update_external_payload(const struct sitl_input &input)
     if (precland && precland->is_enabled()) {
         precland->update(get_location(), get_position_relhome());
         if (precland->_over_precland_base) {
-            local_ground_level += precland->_origin_height;
+            local_ground_level += precland->_device_height;
         }
     }
 
@@ -1013,7 +1031,7 @@ void Aircraft::add_shove_forces(Vector3f &rot_accel, Vector3f &body_accel)
         body_accel.z += sitl->shove.z;
     } else {
         sitl->shove.start_ms = 0;
-        sitl->shove.t = 0;
+        sitl->shove.t.set(0);
     }
 }
 
@@ -1102,7 +1120,7 @@ void Aircraft::add_twist_forces(Vector3f &rot_accel)
         rot_accel.z += sitl->twist.z;
     } else {
         sitl->twist.start_ms = 0;
-        sitl->twist.t = 0;
+        sitl->twist.t.set(0);
     }
 }
 

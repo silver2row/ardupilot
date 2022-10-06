@@ -57,15 +57,6 @@ void loop(void)
 
 static uint32_t start_ms;
 
-/*
-  declare constant app_descriptor in flash
- */
-#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
-const struct app_descriptor app_descriptor __attribute__((section(".app_descriptor")));
-#else
-const struct app_descriptor app_descriptor;
-#endif
-
 AP_Periph_FW::AP_Periph_FW()
 #if HAL_LOGGING_ENABLED
     : logger(g.log_bitmask)
@@ -131,16 +122,15 @@ void AP_Periph_FW::init()
     logger.Init(log_structure, ARRAY_SIZE(log_structure));
 #endif
 
-    printf("Booting %08x:%08x %u/%u len=%u 0x%08x\n",
-           app_descriptor.image_crc1,
-           app_descriptor.image_crc2,
-           app_descriptor.version_major, app_descriptor.version_minor,
-           app_descriptor.image_size,
-           app_descriptor.git_hash);
+    check_firmware_print();
 
     if (hal.util->was_watchdog_reset()) {
         printf("Reboot after watchdog reset\n");
     }
+
+#if AP_STATS_ENABLED
+    node_stats.init();
+#endif
 
 #ifdef HAL_PERIPH_ENABLE_GPS
     if (gps.get_type(0) != AP_GPS::GPS_Type::GPS_TYPE_NONE && g.gps_port >= 0) {
@@ -181,6 +171,17 @@ void AP_Periph_FW::init()
     adsb_init();
 #endif
 
+#ifdef HAL_PERIPH_ENABLE_EFI
+    if (efi.enabled() && g.efi_port >= 0) {
+        auto *uart = hal.serial(g.efi_port);
+        if (uart != nullptr) {
+            uart->begin(g.efi_baudrate);
+            serial_manager.set_protocol_and_baud(g.efi_port, AP_SerialManager::SerialProtocol_EFI, g.efi_baudrate);
+            efi.init();
+        }
+    }
+#endif
+    
 #ifdef HAL_PERIPH_ENABLE_AIRSPEED
     if (airspeed.enabled()){
 #if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
@@ -331,6 +332,10 @@ void AP_Periph_FW::show_stack_free()
 
 void AP_Periph_FW::update()
 {
+#if AP_STATS_ENABLED
+    node_stats.update();
+#endif
+
     static uint32_t last_led_ms;
     uint32_t now = AP_HAL::native_millis();
     if (now - last_led_ms > 1000) {

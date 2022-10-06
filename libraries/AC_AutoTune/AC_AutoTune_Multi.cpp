@@ -1,5 +1,7 @@
 #include "AC_AutoTune_Multi.h"
 
+#include <AP_Logger/AP_Logger.h>
+
 /*
  * autotune support for multicopters
  *
@@ -49,7 +51,7 @@
 #define AUTOTUNE_RLPF_MAX                  5.0f     // maximum Rate Yaw filter value
 #define AUTOTUNE_RP_MIN                   0.01f     // minimum Rate P value
 #define AUTOTUNE_RP_MAX                    2.0f     // maximum Rate P value
-#define AUTOTUNE_SP_MAX                   20.0f     // maximum Stab P value
+#define AUTOTUNE_SP_MAX                   40.0f     // maximum Stab P value
 #define AUTOTUNE_SP_MIN                    0.5f     // maximum Stab P value
 #define AUTOTUNE_RP_ACCEL_MIN            4000.0f     // Minimum acceleration for Roll and Pitch
 #define AUTOTUNE_Y_ACCEL_MIN             1000.0f     // Minimum acceleration for Yaw
@@ -131,7 +133,7 @@ void AC_AutoTune_Multi::backup_gains_and_initialise()
 {
     AC_AutoTune::backup_gains_and_initialise();
 
-    aggressiveness = constrain_float(aggressiveness, 0.05f, 0.2f);
+    aggressiveness.set(constrain_float(aggressiveness, 0.05f, 0.2f));
 
     orig_bf_feedforward = attitude_control->get_bf_feedforward();
 

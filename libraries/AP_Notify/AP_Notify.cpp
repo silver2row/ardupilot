@@ -112,7 +112,11 @@ AP_Notify *AP_Notify::_singleton;
 #endif
 
 #ifndef NOTIFY_LED_OVERRIDE_DEFAULT
-#define NOTIFY_LED_OVERRIDE_DEFAULT 0       // rgb_source_t::standard
+#ifdef HAL_BUILD_AP_PERIPH
+    #define NOTIFY_LED_OVERRIDE_DEFAULT 1       // rgb_source_t::mavlink
+#else
+    #define NOTIFY_LED_OVERRIDE_DEFAULT 0       // rgb_source_t::standard
+#endif
 #endif
 
 #ifndef NOTIFY_LED_LEN_DEFAULT
@@ -172,7 +176,7 @@ const AP_Param::GroupInfo AP_Notify::var_info[] = {
 
     // @Param: BUZZ_PIN
     // @DisplayName: Buzzer pin
-    // @Description: Enables to connect active buzzer to arbitrary pin. Requires 3-pin buzzer or additional MOSFET!
+    // @Description: Enables to connect active buzzer to arbitrary pin. Requires 3-pin buzzer or additional MOSFET! Some the Wiki's "GPIOs" page for how to determine the pin number for a given autopilot.
     // @Values: 0:Disabled
     // @User: Advanced
     AP_GROUPINFO("BUZZ_PIN", 5, AP_Notify, _buzzer_pin, HAL_BUZZER_PIN),
@@ -350,7 +354,7 @@ void AP_Notify::add_backends(void)
 // ChibiOS noise makers
 #if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
     ADD_BACKEND(new Buzzer());
-#if HAL_PWM_COUNT > 0 || HAL_DSHOT_ALARM
+#if HAL_PWM_COUNT > 0 || HAL_DSHOT_ALARM_ENABLED
     ADD_BACKEND(new AP_ToneAlarm());
 #endif
 

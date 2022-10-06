@@ -36,8 +36,7 @@ public:
     static const struct AP_Param::GroupInfo var_info[];
 
     /* Do not allow copies */
-    CANTester(const CANTester &other) = delete;
-    CANTester &operator=(const CANTester&) = delete;
+    CLASS_NO_COPY(CANTester);
 
     void init(uint8_t driver_index, bool enable_filters) override;
     bool add_interface(AP_HAL::CANIface* can_iface) override;
@@ -52,7 +51,6 @@ private:
         TEST_LOOPBACK,
         TEST_BUSOFF_RECOVERY,
         TEST_UAVCAN_DNA,
-        TEST_TOSHIBA_CAN,
         TEST_KDE_CAN,
         TEST_UAVCAN_ESC,
         TEST_UAVCAN_FD_ESC,
@@ -79,8 +77,6 @@ private:
     bool test_busoff_recovery();
 
     bool test_uavcan_dna();
-    bool test_toshiba_can();
-    bool send_toshiba_can_reply(uint32_t cmd);
 
     bool test_kdecan();
 

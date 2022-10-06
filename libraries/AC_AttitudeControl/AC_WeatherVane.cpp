@@ -47,7 +47,7 @@ const AP_Param::GroupInfo AC_WeatherVane::var_info[] = {
 
     // @Param: HGT_MIN
     // @DisplayName: Weathervaning min height
-    // @Description{Copter}: Above this height weathervaning is permitted.  If a range finder is fitted or if terrain is enabled, this parameter sets height AGL.  Otherwise, this parameter sets height above home.  Set zero to ignore minimum height requirement to activate weathervaning.
+    // @Description: Above this height weathervaning is permitted.  If a range finder is fitted or if terrain is enabled, this parameter sets height AGL.  Otherwise, this parameter sets height above home.  Set zero to ignore minimum height requirement to activate weathervaning.
     // @Description{Plane}: Above this height weathervaning is permitted.  If RNGFND_LANDING is enabled or terrain is enabled then this parameter sets height AGL. Otherwise this parameter sets height above home.  Set zero to ignore minimum height requirement to activate weathervaning
     // @Units: m
     // @Range: 0 50
@@ -87,6 +87,13 @@ const AP_Param::GroupInfo AC_WeatherVane::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("LAND", 8, AC_WeatherVane, _landing_direction, -1),
 
+    // @Param: OPTIONS
+    // @DisplayName: Weathervaning options
+    // @Description: Options impacting weathervaning behaviour
+    // @Bitmask: 0:Use pitch when nose or tail-in for faster weathervaning
+    // @User: Standard
+    AP_GROUPINFO("OPTIONS", 9, AC_WeatherVane, _options, 0),
+    
     AP_GROUPEND
 };
 
@@ -159,14 +166,18 @@ bool AC_WeatherVane::get_yaw_out(float &yaw_output, const int16_t pilot_yaw, con
     const float deadzone_cdeg = _min_dz_ang_deg*100.0;
     float output = 0.0;
     const char* dir_string = "";
+
+    // should we enable pitch input for nose-in and tail-in?
+    const bool pitch_enable = (uint8_t(_options.get()) & uint8_t(Options::PITCH_ENABLE)) != 0;
+
     switch (dir) {
         case Direction::OFF:
             reset();
             return false;
 
         case Direction::NOSE_IN:
-            if (is_positive(pitch_cdeg)) {
-                output = fabsf(roll_cdeg) + pitch_cdeg;
+            if (pitch_enable && is_positive(pitch_cdeg - deadzone_cdeg)) {
+                output = fabsf(roll_cdeg) + (pitch_cdeg - deadzone_cdeg);
             } else {
                 output = MAX(fabsf(roll_cdeg) - deadzone_cdeg, 0.0);
             }
@@ -193,8 +204,8 @@ bool AC_WeatherVane::get_yaw_out(float &yaw_output, const int16_t pilot_yaw, con
             break;
 
         case Direction::TAIL_IN:
-            if (is_negative(pitch_cdeg)) {
-                output = fabsf(roll_cdeg) - pitch_cdeg;
+            if (pitch_enable && is_negative(pitch_cdeg + deadzone_cdeg)) {
+                output = fabsf(roll_cdeg) - (pitch_cdeg + deadzone_cdeg);
             } else {
                 output = MAX(fabsf(roll_cdeg) - deadzone_cdeg, 0.0);
             }

@@ -1,14 +1,18 @@
 #include "AP_Logger.h"
 
+#if HAL_LOGGING_ENABLED
+
 #include "AP_Logger_Backend.h"
 
 #include "AP_Logger_File.h"
 #include "AP_Logger_DataFlash.h"
+#include "AP_Logger_W25N01GV.h"
 #include "AP_Logger_MAVLink.h"
 
 #include <AP_InternalError/AP_InternalError.h>
 #include <GCS_MAVLink/GCS.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
+#include <AP_Rally/AP_Rally.h>
 
 AP_Logger *AP_Logger::_singleton;
 
@@ -26,8 +30,12 @@ extern const AP_HAL::HAL& hal;
 #endif
 #endif
 
+#ifndef HAL_LOGGING_DATAFLASH_DRIVER
+#define HAL_LOGGING_DATAFLASH_DRIVER AP_Logger_DataFlash
+#endif
+
 #ifndef HAL_LOGGING_STACK_SIZE
-#define HAL_LOGGING_STACK_SIZE 1324
+#define HAL_LOGGING_STACK_SIZE 1580
 #endif
 
 #ifndef HAL_LOGGING_MAV_BUFSIZE
@@ -56,6 +64,14 @@ extern const AP_HAL::HAL& hal;
 #  define HAL_LOGGING_BACKENDS_DEFAULT 0
 # endif
 #endif
+
+// when adding new msgs we start at a different index in replay
+#if APM_BUILD_TYPE(APM_BUILD_Replay)
+#define LOGGING_FIRST_DYNAMIC_MSGID REPLAY_LOG_NEW_MSG_MAX
+#else
+#define LOGGING_FIRST_DYNAMIC_MSGID 254
+#endif
+
 
 const AP_Param::GroupInfo AP_Logger::var_info[] = {
     // @Param: _BACKEND_TYPE
@@ -121,6 +137,7 @@ const AP_Param::GroupInfo AP_Logger::var_info[] = {
     // @Description: This sets the maximum rate that streaming log messages will be logged to the file backend. A value of zero means that rate limiting is disabled.
     // @Units: Hz
     // @Range: 0 1000
+    // @Increment: 0.1
     // @User: Standard
     AP_GROUPINFO("_FILE_RATEMAX",  8, AP_Logger, _params.file_ratemax, 0),
 
@@ -130,6 +147,7 @@ const AP_Param::GroupInfo AP_Logger::var_info[] = {
     // @Description: This sets the maximum rate that streaming log messages will be logged to the mavlink backend. A value of zero means that rate limiting is disabled.
     // @Units: Hz
     // @Range: 0 1000
+    // @Increment: 0.1
     // @User: Standard
     AP_GROUPINFO("_MAV_RATEMAX",  9, AP_Logger, _params.mav_ratemax, 0),
 #endif
@@ -140,6 +158,7 @@ const AP_Param::GroupInfo AP_Logger::var_info[] = {
     // @Description: This sets the maximum rate that streaming log messages will be logged to the mavlink backend. A value of zero means that rate limiting is disabled.
     // @Units: Hz
     // @Range: 0 1000
+    // @Increment: 0.1
     // @User: Standard
     AP_GROUPINFO("_BLK_RATEMAX", 10, AP_Logger, _params.blk_ratemax, 0),
 #endif
@@ -186,7 +205,7 @@ void AP_Logger::Init(const struct LogStructure *structures, uint8_t num_types)
         { Backend_Type::FILESYSTEM, AP_Logger_File::probe },
 #endif
 #if HAL_LOGGING_DATAFLASH_ENABLED
-        { Backend_Type::BLOCK, AP_Logger_DataFlash::probe },
+        { Backend_Type::BLOCK, HAL_LOGGING_DATAFLASH_DRIVER::probe },
 #endif
 #if HAL_LOGGING_MAVLINK_ENABLED
         { Backend_Type::MAVLINK, AP_Logger_MAVLink::probe },
@@ -204,7 +223,7 @@ void AP_Logger::Init(const struct LogStructure *structures, uint8_t num_types)
         LoggerMessageWriter_DFLogStart *message_writer =
             new LoggerMessageWriter_DFLogStart();
         if (message_writer == nullptr)  {
-            AP_BoardConfig::allocation_error("mesage writer");
+            AP_BoardConfig::allocation_error("message writer");
         }
         backends[_next_backend] = backend_config.probe_fn(*this, message_writer);
         if (backends[_next_backend] == nullptr) {
@@ -849,7 +868,7 @@ void AP_Logger::Write_Mode(uint8_t mode, const ModeReason reason)
 
 void AP_Logger::Write_Parameter(const char *name, float value)
 {
-    FOR_EACH_BACKEND(Write_Parameter(name, value));
+    FOR_EACH_BACKEND(Write_Parameter(name, value, quiet_nanf()));
 }
 
 void AP_Logger::Write_Mission_Cmd(const AP_Mission &mission,
@@ -869,6 +888,13 @@ void AP_Logger::Write_RallyPoint(uint8_t total,
 void AP_Logger::Write_Rally()
 {
     FOR_EACH_BACKEND(Write_Rally());
+}
+#endif
+
+#if HAL_LOGGER_FENCE_ENABLED
+void AP_Logger::Write_Fence()
+{
+    FOR_EACH_BACKEND(Write_Fence());
 }
 #endif
 
@@ -1078,12 +1104,6 @@ AP_Logger::log_write_fmt *AP_Logger::msg_fmt_for_name(const char *name, const ch
         }
     }
 
-#if APM_BUILD_TYPE(APM_BUILD_Replay)
-    // don't allow for new msg types during replay. We will be able to
-    // support these eventually, but for now they cause corruption
-    return nullptr;
-#endif
-
     f = (struct log_write_fmt *)calloc(1, sizeof(*f));
     if (f == nullptr) {
         // out of memory
@@ -1198,8 +1218,9 @@ bool AP_Logger::msg_type_in_use(const uint8_t msg_type) const
 // find a free message type
 int16_t AP_Logger::find_free_msg_type() const
 {
+    const uint8_t start = LOGGING_FIRST_DYNAMIC_MSGID;
     // avoid using 255 here; perhaps we want to use it to extend things later
-    for (uint16_t msg_type=254; msg_type>0; msg_type--) { // more likely to be free at end
+    for (uint16_t msg_type=start; msg_type>0; msg_type--) { // more likely to be free at end
         if (! msg_type_in_use(msg_type)) {
             return msg_type;
         }
@@ -1290,6 +1311,36 @@ int16_t AP_Logger::Write_calc_msg_len(const char *fmt) const
     return len;
 }
 
+/*
+  see if we need to save a crash dump. Returns true if either no crash
+  dump available or we have saved it to sdcard. This is called
+  continuously until success to account for late mount of the microSD
+ */
+bool AP_Logger::check_crash_dump_save(void)
+{
+    int fd = AP::FS().open("@SYS/crash_dump.bin", O_RDONLY);
+    if (fd == -1) {
+        // we don't have a crash dump file. The @SYS filesystem
+        // returns -1 for open on empty files
+        return true;
+    }
+    int fd2 = AP::FS().open("APM/crash_dump.bin", O_WRONLY|O_CREAT|O_TRUNC);
+    if (fd2 == -1) {
+        // sdcard not available yet, try again later
+        AP::FS().close(fd);
+        return false;
+    }
+    uint8_t buf[128];
+    int32_t n;
+    while ((n = AP::FS().read(fd, buf, sizeof(buf))) > 0) {
+        AP::FS().write(fd2, buf, n);
+    }
+    AP::FS().close(fd2);
+    AP::FS().close(fd);
+    GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "Saved crash_dump.bin");
+    return true;
+}
+
 // thread for processing IO - in general IO involves a long blocking DMA write to an SPI device
 // and the thread will sleep while this completes preventing other tasks from running, it therefore
 // is necessary to run the IO in it's own thread
@@ -1297,6 +1348,8 @@ void AP_Logger::io_thread(void)
 {
     uint32_t last_run_us = AP_HAL::micros();
     uint32_t last_stack_us = last_run_us;
+    uint32_t last_crash_check_us = last_run_us;
+    bool done_crash_dump_save = false;
 
     while (true) {
         uint32_t now = AP_HAL::micros();
@@ -1314,6 +1367,13 @@ void AP_Logger::io_thread(void)
         if (now - last_stack_us > 100000U) {
             last_stack_us = now;
             hal.util->log_stack_info();
+        }
+
+        // check for saving a crash dump file every 5s
+        if (!done_crash_dump_save &&
+            now - last_crash_check_us > 5000000U) {
+            last_crash_check_us = now;
+            done_crash_dump_save = check_crash_dump_save();
         }
 #if HAL_LOGGER_FILE_CONTENTS_ENABLED
         file_content_update();
@@ -1532,14 +1592,15 @@ void AP_Logger::file_content_update(FileContent &file_content)
         return;
     }
 
-    /* this function is called at max 1kHz. We don't want to saturate
-       the logging with file data, so we reduce the frequency of 64
-       byte file writes by a factor of 100. For the file
-       crash_dump.bin we dump 10x faster so we get it in a reasonable
-       time (full dump of 450k in about 1 minute)
+    /* this function is called at around 100Hz on average (tested on
+       400Hz copter). We don't want to saturate the logging with file
+       data, so we reduce the frequency of 64 byte file writes by a
+       factor of 10. For the file crash_dump.bin we dump 10x faster so
+       we get it in a reasonable time (full dump of 450k in about 1
+       minute)
     */
     file_content.counter++;
-    const uint8_t frequency = file_content.fast?10:100;
+    const uint8_t frequency = file_content.fast?1:10;
     if (file_content.counter % frequency != 0) {
         return;
     }
@@ -1565,6 +1626,7 @@ void AP_Logger::file_content_update(FileContent &file_content)
     const auto length = AP::FS().read(file_content.fd, pkt.data, sizeof(pkt.data));
     if (length <= 0) {
         AP::FS().close(file_content.fd);
+        file_content.fd = -1;
         file_content.remove_and_free(file);
         return;
     }
@@ -1587,3 +1649,5 @@ AP_Logger &logger()
 }
 
 };
+
+#endif // HAL_LOGGING_ENABLED

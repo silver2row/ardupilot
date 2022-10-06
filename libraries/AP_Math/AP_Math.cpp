@@ -313,9 +313,13 @@ T constrain_value(const T amt, const T low, const T high)
 }
 
 template int constrain_value<int>(const int amt, const int low, const int high);
+template unsigned int constrain_value<unsigned int>(const unsigned int amt, const unsigned int low, const unsigned int high);
 template long constrain_value<long>(const long amt, const long low, const long high);
+template unsigned long constrain_value<unsigned long>(const unsigned long amt, const unsigned long low, const unsigned long high);
 template long long constrain_value<long long>(const long long amt, const long long low, const long long high);
+template unsigned long long constrain_value<unsigned long long>(const unsigned long long amt, const unsigned long long low, const unsigned long long high);
 template short constrain_value<short>(const short amt, const short low, const short high);
+template unsigned short constrain_value<unsigned short>(const unsigned short amt, const unsigned short low, const unsigned short high);
 template float constrain_value<float>(const float amt, const float low, const float high);
 template double constrain_value<double>(const double amt, const double low, const double high);
 
@@ -400,7 +404,7 @@ float calc_lowpass_alpha_dt(float dt, float cutoff_freq)
         return 1.0;
     }
     float rc = 1.0f/(M_2PI*cutoff_freq);
-    return constrain_float(dt/(dt+rc), 0.0f, 1.0f);
+    return dt/(dt+rc);
 }
 
 #ifndef AP_MATH_FILL_NANF_USE_MEMCPY
@@ -482,4 +486,37 @@ float fixedwing_turn_rate(float bank_angle_deg, float airspeed)
 float degF_to_Kelvin(float temp_f)
 {
     return (temp_f + 459.67) * 0.55556;
+}
+
+/*
+  conversion functions to prevent undefined behaviour
+ */
+int16_t float_to_int16(const float v)
+{
+    return int16_t(constrain_float(v, INT16_MIN, INT16_MAX));
+}
+
+int32_t float_to_int32(const float v)
+{
+    return int32_t(constrain_float(v, INT32_MIN, INT32_MAX));
+}
+
+uint16_t float_to_uint16(const float v)
+{
+    return uint16_t(constrain_float(v, 0, UINT16_MAX));
+}
+
+uint32_t float_to_uint32(const float v)
+{
+    return uint32_t(constrain_float(v, 0, UINT32_MAX));
+}
+
+uint32_t double_to_uint32(const double v)
+{
+    return uint32_t(constrain_double(v, 0, UINT32_MAX));
+}
+
+int32_t double_to_int32(const double v)
+{
+    return int32_t(constrain_double(v, INT32_MIN, UINT32_MAX));
 }

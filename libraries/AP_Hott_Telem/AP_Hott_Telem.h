@@ -15,7 +15,6 @@
 #pragma once
 
 #include <AP_HAL/AP_HAL.h>
-#include <AP_SerialManager/AP_SerialManager.h>
 
 #ifndef HAL_HOTT_TELEM_ENABLED
 #define HAL_HOTT_TELEM_ENABLED !HAL_MINIMIZE_FEATURES
@@ -27,8 +26,7 @@ public:
     AP_Hott_Telem();
 
     /* Do not allow copies */
-    AP_Hott_Telem(const AP_Hott_Telem &other) = delete;
-    AP_Hott_Telem &operator=(const AP_Hott_Telem&) = delete;
+    CLASS_NO_COPY(AP_Hott_Telem);
 
     static AP_Hott_Telem *get_singleton(void) {
         return singleton;

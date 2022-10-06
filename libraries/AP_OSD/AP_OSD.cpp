@@ -45,7 +45,7 @@ const AP_Param::GroupInfo AP_OSD::var_info[] = {
     // @Param: _TYPE
     // @DisplayName: OSD type
     // @Description: OSD type. TXONLY makes the OSD parameter selection available to other modules even if there is no native OSD support on the board, for instance CRSF.
-    // @Values: 0:None,1:MAX7456,2:SITL,3:MSP,4:TXONLY
+    // @Values: 0:None,1:MAX7456,2:SITL,3:MSP,4:TXONLY,5:MSP_DISPLAYPORT
     // @User: Standard
     // @RebootRequired: True
     AP_GROUPINFO_FLAGS("_TYPE", 1, AP_OSD, osd_type, 0, AP_PARAM_FLAG_ENABLE),
@@ -240,7 +240,7 @@ AP_OSD::AP_OSD()
     AP_Param::setup_object_defaults(this, var_info);
 #if OSD_ENABLED
     // default first screen enabled
-    screen[0].enabled = 1;
+    screen[0].enabled.set(1);
     previous_pwm_screen = -1;
 #endif
 #ifdef WITH_SITL_OSD
@@ -267,11 +267,13 @@ void AP_OSD::init()
         if (!spi_dev) {
             break;
         }
+#if HAL_WITH_OSD_BITMAP
         backend = AP_OSD_MAX7456::probe(*this, std::move(spi_dev));
+#endif
         if (backend == nullptr) {
             break;
         }
-        hal.console->printf("Started MAX7456 OSD\n");
+        DEV_PRINTF("Started MAX7456 OSD\n");
 #endif
         break;
     }
@@ -282,7 +284,7 @@ void AP_OSD::init()
         if (backend == nullptr) {
             break;
         }
-        hal.console->printf("Started SITL OSD\n");
+        DEV_PRINTF("Started SITL OSD\n");
         break;
     }
 #endif
@@ -291,7 +293,7 @@ void AP_OSD::init()
         if (backend == nullptr) {
             break;
         }
-        hal.console->printf("Started MSP OSD\n");
+        DEV_PRINTF("Started MSP OSD\n");
         break;
     }
 #if HAL_WITH_MSP_DISPLAYPORT
@@ -300,7 +302,7 @@ void AP_OSD::init()
         if (backend == nullptr) {
             break;
         }
-        hal.console->printf("Started MSP DisplayPort OSD\n");
+        DEV_PRINTF("Started MSP DisplayPort OSD\n");
         break;
     }
 #endif
@@ -318,6 +320,9 @@ void AP_OSD::init()
 #if OSD_ENABLED
 void AP_OSD::osd_thread()
 {
+    // initialize thread specific code once
+    backend->osd_thread_run_once();
+
     while (true) {
         hal.scheduler->delay(100);
         update_osd();
