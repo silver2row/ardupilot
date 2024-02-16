@@ -39,7 +39,7 @@ const AP_Param::GroupInfo AP_OpticalFlow::var_info[] = {
     // @Param: _FXSCALER
     // @DisplayName: X axis optical flow scale factor correction
     // @Description: This sets the parts per thousand scale factor correction applied to the flow sensor X axis optical rate. It can be used to correct for variations in effective focal length. Each positive increment of 1 increases the scale factor applied to the X axis optical flow reading by 0.1%. Negative values reduce the scale factor.
-    // @Range: -200 +200
+    // @Range: -800 +800
     // @Increment: 1
     // @User: Standard
     AP_GROUPINFO("_FXSCALER", 1,  AP_OpticalFlow,    _flowScalerX,   0),
@@ -47,7 +47,7 @@ const AP_Param::GroupInfo AP_OpticalFlow::var_info[] = {
     // @Param: _FYSCALER
     // @DisplayName: Y axis optical flow scale factor correction
     // @Description: This sets the parts per thousand scale factor correction applied to the flow sensor Y axis optical rate. It can be used to correct for variations in effective focal length. Each positive increment of 1 increases the scale factor applied to the Y axis optical flow reading by 0.1%. Negative values reduce the scale factor.
-    // @Range: -200 +200
+    // @Range: -800 +800
     // @Increment: 1
     // @User: Standard
     AP_GROUPINFO("_FYSCALER", 2,  AP_OpticalFlow,    _flowScalerY,   0),
@@ -92,6 +92,15 @@ const AP_Param::GroupInfo AP_OpticalFlow::var_info[] = {
     // @Range: 0 127
     // @User: Advanced
     AP_GROUPINFO("_ADDR", 5,  AP_OpticalFlow, _address,   0),
+
+    // @Param: _HGT_OVR
+    // @DisplayName: Height override of sensor above ground
+    // @Description: This is used in rover vehicles, where the sensor is a fixed height above the ground
+    // @Units: m
+    // @Range: 0 2
+    // @Increment: 0.01
+    // @User: Advanced
+    AP_GROUPINFO_FRAME("_HGT_OVR", 6,  AP_OpticalFlow, _height_override,   0.0f, AP_PARAM_FRAME_ROVER),
 
     AP_GROUPEND
 };
@@ -184,6 +193,7 @@ void AP_OpticalFlow::update(void)
     // only healthy if the data is less than 0.5s old
     _flags.healthy = (AP_HAL::millis() - _last_update_ms < 500);
 
+#if AP_OPTICALFLOW_CALIBRATOR_ENABLED
     // update calibrator and save resulting scaling
     if (_calibrator != nullptr) {
         if (_calibrator->update()) {
@@ -198,6 +208,7 @@ void AP_OpticalFlow::update(void)
             GCS_SEND_TEXT(MAV_SEVERITY_INFO, "FlowCal: FLOW_FXSCALER=%d, FLOW_FYSCALER=%d", (int)_flowScalerX, (int)_flowScalerY);
         }
     }
+#endif
 }
 
 void AP_OpticalFlow::handle_msg(const mavlink_message_t &msg)
@@ -226,6 +237,7 @@ void AP_OpticalFlow::handle_msp(const MSP::msp_opflow_data_message_t &pkt)
 }
 #endif //HAL_MSP_OPTICALFLOW_ENABLED
 
+#if AP_OPTICALFLOW_CALIBRATOR_ENABLED
 // start calibration
 void AP_OpticalFlow::start_calibration()
 {
@@ -248,21 +260,28 @@ void AP_OpticalFlow::stop_calibration()
         _calibrator->stop();
     }
 }
+#endif
 
 void AP_OpticalFlow::update_state(const OpticalFlow_state &state)
 {
     _state = state;
     _last_update_ms = AP_HAL::millis();
 
+#if AP_AHRS_ENABLED
     // write to log and send to EKF if new data has arrived
     AP::ahrs().writeOptFlowMeas(quality(),
                                 _state.flowRate,
                                 _state.bodyRate,
                                 _last_update_ms,
-                                get_pos_offset());
+                                get_pos_offset(),
+                                get_height_override());
+#endif
+#if HAL_LOGGING_ENABLED
     Log_Write_Optflow();
+#endif
 }
 
+#if HAL_LOGGING_ENABLED
 void AP_OpticalFlow::Log_Write_Optflow()
 {
     AP_Logger *logger = AP_Logger::get_singleton();
@@ -285,7 +304,7 @@ void AP_OpticalFlow::Log_Write_Optflow()
     };
     logger->WriteBlock(&pkt, sizeof(pkt));
 }
-
+#endif  // HAL_LOGGING_ENABLED
 
 
 // singleton instance

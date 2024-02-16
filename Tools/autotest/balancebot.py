@@ -10,9 +10,9 @@ from __future__ import print_function
 import os
 
 from rover import AutoTestRover
-from common import AutoTest
 
-from common import NotAchievedException
+import vehicle_test_suite
+from vehicle_test_suite import NotAchievedException
 
 # get location of scripts
 testdir = os.path.dirname(os.path.realpath(__file__))
@@ -60,7 +60,6 @@ class AutoTestBalanceBot(AutoTestRover):
         '''make sure wheel encoders are generally working'''
         ex = None
         try:
-            self.set_parameter("ATC_BAL_SPD_FF", 0)
             self.set_parameter("WENC_TYPE", 10)
             self.set_parameter("AHRS_EKF_TYPE", 10)
             self.reboot_sitl()
@@ -106,13 +105,13 @@ class AutoTestBalanceBot(AutoTestRover):
 
         '''note that while AutoTestBalanceBot inherits from Rover we don't
 inherit Rover's tests!'''
-        ret = AutoTest.tests(self)
+        ret = vehicle_test_suite.TestSuite.tests(self)
 
         ret.extend([
             self.DriveRTL,
             self.DriveMission,
             self.TestWheelEncoder,
-            self.GetBanner,
+            self.MAV_CMD_DO_SEND_BANNER,
             self.DO_SET_MODE,
             self.ServoRelayEvents,
         ])

@@ -12,6 +12,9 @@
 #include <AP_Terrain/AP_Terrain.h>
 #include <AC_Avoidance/AC_Avoid.h>                 // Stop at fence library
 
+// maximum velocities and accelerations
+#define WPNAV_ACCELERATION              250.0f      // maximum horizontal acceleration in cm/s/s that wp navigation will request
+
 class AC_WPNav
 {
 public:
@@ -19,8 +22,9 @@ public:
     /// Constructor
     AC_WPNav(const AP_InertialNav& inav, const AP_AHRS_View& ahrs, AC_PosControl& pos_control, const AC_AttitudeControl& attitude_control);
 
-    /// provide rangefinder altitude
-    void set_rangefinder_alt(bool use, bool healthy, float alt_cm) { _rangefinder_available = use; _rangefinder_healthy = healthy; _rangefinder_alt_cm = alt_cm; }
+    /// provide rangefinder based terrain offset
+    /// terrain offset is the terrain's height above the EKF origin
+    void set_rangefinder_terrain_offset(bool use, bool healthy, float terrain_offset_cm) { _rangefinder_available = use; _rangefinder_healthy = healthy; _rangefinder_terrain_offset_cm = terrain_offset_cm;}
 
     // return true if range finder may be used for terrain following
     bool rangefinder_used() const { return _rangefinder_use; }
@@ -81,7 +85,10 @@ public:
     float get_accel_z() const { return _wp_accel_z_cmss; }
 
     /// get_wp_acceleration - returns acceleration in cm/s/s during missions
-    float get_wp_acceleration() const { return _wp_accel_cmss.get(); }
+    float get_wp_acceleration() const { return (is_positive(_wp_accel_cmss)) ? _wp_accel_cmss : WPNAV_ACCELERATION; }
+
+    /// get_corner_acceleration - returns maximum acceleration in cm/s/s used during cornering in missions
+    float get_corner_acceleration() const { return (is_positive(_wp_accel_c_cmss)) ? _wp_accel_c_cmss : 2.0 * get_wp_acceleration(); }
 
     /// get_wp_destination waypoint using position vector
     /// x,y are distance from ekf origin in cm
@@ -155,6 +162,11 @@ public:
 
     // returns true if update_wpnav has been run very recently
     bool is_active() const;
+
+    // force stopping at next waypoint.  Used by Dijkstra's object avoidance when path from destination to next destination is not clear
+    // only affects regular (e.g. non-spline) waypoints
+    // returns true if this had any affect on the path
+    bool force_stop_at_next_wp();
 
     ///
     /// spline methods
@@ -235,10 +247,13 @@ protected:
     AP_Float    _wp_speed_down_cms;     // default maximum descent rate in cm/s
     AP_Float    _wp_radius_cm;          // distance from a waypoint in cm that, when crossed, indicates the wp has been reached
     AP_Float    _wp_accel_cmss;         // horizontal acceleration in cm/s/s during missions
+    AP_Float    _wp_accel_c_cmss;       // cornering acceleration in cm/s/s during missions
     AP_Float    _wp_accel_z_cmss;       // vertical acceleration in cm/s/s during missions
     AP_Float    _wp_jerk;               // maximum jerk used to generate scurve trajectories in m/s/s/s
     AP_Float    _terrain_margin;        // terrain following altitude margin. vehicle will stop if distance from target altitude is larger than this margin
 
+    // WPNAV_SPEED param change checker
+    bool _check_wp_speed_change;        // if true WPNAV_SPEED param should be checked for changes in-flight
     float _last_wp_speed_cms;  // last recorded WPNAV_SPEED, used for changing speed in-flight
     float _last_wp_speed_up_cms;  // last recorded WPNAV_SPEED_UP, used for changing speed in-flight
     float _last_wp_speed_down_cms;  // last recorded WPNAV_SPEED_DN, used for changing speed in-flight
@@ -247,7 +262,6 @@ protected:
     SCurve _scurve_prev_leg;            // previous scurve trajectory used to blend with current scurve trajectory
     SCurve _scurve_this_leg;            // current scurve trajectory
     SCurve _scurve_next_leg;            // next scurve trajectory used to blend with current scurve trajectory
-    float _scurve_accel_corner;         // scurve maximum corner acceleration in m/s/s
     float _scurve_jerk;                 // scurve jerk max in m/s/s/s
     float _scurve_snap;                 // scurve snap in m/s/s/s/s
 
@@ -264,6 +278,7 @@ protected:
     float       _wp_desired_speed_xy_cms;   // desired wp speed in cm/sec
     Vector3f    _origin;                // starting point of trip to next waypoint in cm from ekf origin
     Vector3f    _destination;           // target destination in cm from ekf origin
+    Vector3f    _next_destination;      // next target destination in cm from ekf origin
     float       _track_scalar_dt;       // time compression multiplier to slow the progress along the track
     float       _offset_vel;            // horizontal velocity reference used to slow the aircraft for pause and to ensure the aircraft can maintain height above terrain
     float       _offset_accel;          // horizontal acceleration reference used to slow the aircraft for pause and to ensure the aircraft can maintain height above terrain
@@ -274,5 +289,5 @@ protected:
     bool        _rangefinder_available; // true if rangefinder is enabled (user switch can turn this true/false)
     AP_Int8     _rangefinder_use;       // parameter that specifies if the range finder should be used for terrain following commands
     bool        _rangefinder_healthy;   // true if rangefinder distance is healthy (i.e. between min and maximum)
-    float       _rangefinder_alt_cm;    // latest distance from the rangefinder
+    float       _rangefinder_terrain_offset_cm; // latest rangefinder based terrain offset (e.g. terrain's height above EKF origin)
 };

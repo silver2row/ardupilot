@@ -1,12 +1,9 @@
+#include "AP_Compass_LSM9DS1.h"
 
-#include <assert.h>
-#include <utility>
+#if AP_COMPASS_LSM9DS1_ENABLED
 
 #include <AP_Math/AP_Math.h>
 #include <AP_HAL/AP_HAL.h>
-
-#include "AP_Compass_LSM9DS1.h"
-
 
 #define LSM9DS1M_OFFSET_X_REG_L_M   0x05
 #define LSM9DS1M_OFFSET_X_REG_H_M   0x06
@@ -49,11 +46,6 @@
 #define LSM9DS1M_INT_SRC_M          0x31
 #define LSM9DS1M_INT_THS_L_M        0x32
 #define LSM9DS1M_INT_THS_H_M        0x33
-
-struct PACKED sample_regs {
-    uint8_t status;
-    int16_t val[3];
-};
 
 extern const AP_HAL::HAL &hal;
 
@@ -234,3 +226,5 @@ void AP_Compass_LSM9DS1::_register_modify(uint8_t reg, uint8_t clearbits, uint8_
     val |= setbits;
     _register_write(reg, val);
 }
+
+#endif

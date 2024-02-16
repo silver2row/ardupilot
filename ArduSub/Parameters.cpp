@@ -20,12 +20,6 @@
  *
  */
 
-#define GSCALAR(v, name, def) { sub.g.v.vtype, name, Parameters::k_param_ ## v, &sub.g.v, {def_value : def} }
-#define ASCALAR(v, name, def) { sub.aparm.v.vtype, name, Parameters::k_param_ ## v, (const void *)&sub.aparm.v, {def_value : def} }
-#define GGROUP(v, name, class) { AP_PARAM_GROUP, name, Parameters::k_param_ ## v, &sub.g.v, {group_info : class::var_info} }
-#define GOBJECT(v, name, class) { AP_PARAM_GROUP, name, Parameters::k_param_ ## v, (const void *)&sub.v, {group_info : class::var_info} }
-#define GOBJECTN(v, pname, name, class) { AP_PARAM_GROUP, name, Parameters::k_param_ ## pname, (const void *)&sub.v, {group_info : class::var_info} }
-
 const AP_Param::Info Sub::var_info[] = {
 
     // @Param: SURFACE_DEPTH
@@ -53,6 +47,8 @@ const AP_Param::Info Sub::var_info[] = {
     // @Param: SYSID_MYGCS
     // @DisplayName: My ground station number
     // @Description: Allows restricting radio overrides to only come from my ground station
+    // @Range: 1 255
+    // @Increment: 1
     // @User: Advanced
     GSCALAR(sysid_my_gcs,   "SYSID_MYGCS",     255),
 
@@ -241,7 +237,7 @@ const AP_Param::Info Sub::var_info[] = {
 
     // @Param: JS_GAIN_DEFAULT
     // @DisplayName: Default gain at boot
-    // @Description: Default gain at boot, must be in range [JS_GAIN_MIN , JS_GAIN_MAX]
+    // @Description: Default gain at boot, must be in range [JS_GAIN_MIN , JS_GAIN_MAX]. Current gain value is accessible via NAMED_VALUE_FLOAT MAVLink message with name 'PilotGain'.
     // @User: Standard
     // @Range: 0.1 1.0
     GSCALAR(gain_default, "JS_GAIN_DEFAULT", 0.5),
@@ -277,7 +273,7 @@ const AP_Param::Info Sub::var_info[] = {
 
     // @Param: JS_THR_GAIN
     // @DisplayName: Throttle gain scalar
-    // @Description: Scalar for gain on the throttle channel
+    // @Description: Scalar for gain on the throttle channel. Gets scaled with the current JS gain
     // @User: Standard
     // @Range: 0.5 4.0
     GSCALAR(throttle_gain, "JS_THR_GAIN", 1.0f),
@@ -354,6 +350,70 @@ const AP_Param::Info Sub::var_info[] = {
     // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
     GGROUP(jbtn_15,                   "BTN15_", JSButton),
 
+    // @Group: BTN16_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_16,                   "BTN16_", JSButton),
+
+    // @Group: BTN17_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_17,                   "BTN17_", JSButton),
+
+    // @Group: BTN18_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_18,                   "BTN18_", JSButton),
+
+    // @Group: BTN19_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_19,                   "BTN19_", JSButton),
+
+    // @Group: BTN20_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_20,                   "BTN20_", JSButton),
+
+    // @Group: BTN21_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_21,                   "BTN21_", JSButton),
+
+    // @Group: BTN22_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_22,                   "BTN22_", JSButton),
+
+    // @Group: BTN23_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_23,                   "BTN23_", JSButton),
+
+    // @Group: BTN24_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_24,                   "BTN24_", JSButton),
+
+    // @Group: BTN25_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_25,                   "BTN25_", JSButton),
+
+    // @Group: BTN26_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_26,                   "BTN26_", JSButton),
+
+    // @Group: BTN27_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_27,                   "BTN27_", JSButton),
+
+    // @Group: BTN28_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_28,                   "BTN28_", JSButton),
+
+    // @Group: BTN29_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_29,                   "BTN29_", JSButton),
+
+    // @Group: BTN30_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_30,                   "BTN30_", JSButton),
+
+    // @Group: BTN31_
+    // @Path: ../libraries/AP_JSButton/AP_JSButton.cpp
+    GGROUP(jbtn_31,                   "BTN31_", JSButton),
+
     // @Param: RC_SPEED
     // @DisplayName: ESC Update Speed
     // @Description: This is the speed in Hertz that your ESCs will receive updates
@@ -410,22 +470,24 @@ const AP_Param::Info Sub::var_info[] = {
     // variables not in the g class which contain EEPROM saved variables
 
 #if AP_CAMERA_ENABLED
-    // @Group: CAM_
+    // @Group: CAM
     // @Path: ../libraries/AP_Camera/AP_Camera.cpp
-    GOBJECT(camera,           "CAM_", AP_Camera),
+    GOBJECT(camera, "CAM", AP_Camera),
 #endif
 
-    // @Group: RELAY_
+#if AP_RELAY_ENABLED
+    // @Group: RELAY
     // @Path: ../libraries/AP_Relay/AP_Relay.cpp
-    GOBJECT(relay,                  "RELAY_", AP_Relay),
+    GOBJECT(relay,                  "RELAY", AP_Relay),
+#endif
 
     // @Group: COMPASS_
     // @Path: ../libraries/AP_Compass/AP_Compass.cpp
     GOBJECT(compass,        "COMPASS_", Compass),
 
-    // @Group: INS_
+    // @Group: INS
     // @Path: ../libraries/AP_InertialSensor/AP_InertialSensor.cpp
-    GOBJECT(ins,            "INS_", AP_InertialSensor),
+    GOBJECT(ins,            "INS", AP_InertialSensor),
 
     // @Group: WPNAV_
     // @Path: ../libraries/AC_WPNav/AC_WPNav.cpp
@@ -522,6 +584,8 @@ const AP_Param::Info Sub::var_info[] = {
 #endif
 
 #if AP_SIM_ENABLED
+    // @Group: SIM_
+    // @Path: ../libraries/SITL/SITL.cpp
     GOBJECT(sitl, "SIM_", SITL::SIM),
 #endif
 
@@ -615,7 +679,7 @@ const AP_Param::Info Sub::var_info[] = {
 
     // @Group:
     // @Path: ../libraries/AP_Vehicle/AP_Vehicle.cpp
-    { AP_PARAM_GROUP, "", Parameters::k_param_vehicle, (const void *)&sub, {group_info : AP_Vehicle::var_info} },
+    PARAM_VEHICLE_INFO,
 
     AP_VAREND
 };
@@ -624,7 +688,11 @@ const AP_Param::Info Sub::var_info[] = {
   2nd group of parameters
  */
 const AP_Param::GroupInfo ParametersG2::var_info[] = {
-
+#if STATS_ENABLED == ENABLED
+    // @Group: STAT
+    // @Path: ../libraries/AP_Stats/AP_Stats.cpp
+    AP_SUBGROUPINFO(stats, "STAT", 1, ParametersG2, AP_Stats),
+#endif
 #if HAL_PROXIMITY_ENABLED
     // @Group: PRX
     // @Path: ../libraries/AP_Proximity/AP_Proximity.cpp
@@ -674,11 +742,6 @@ const AP_Param::ConversionInfo conversion_table[] = {
 
 void Sub::load_parameters()
 {
-    if (!AP_Param::check_var_info()) {
-        hal.console->printf("Bad var table\n");
-        AP_HAL::panic("Bad var table");
-    }
-
     hal.util->set_soft_armed(false);
 
     if (!g.format_version.load() ||
@@ -704,22 +767,7 @@ void Sub::load_parameters()
     AP_Param::set_frame_type_flags(AP_PARAM_FRAME_SUB);
 
     convert_old_parameters();
-
-    AP_Param::set_default_by_name("BRD_SAFETYENABLE", 0);
-    AP_Param::set_default_by_name("ARMING_CHECK",
-            AP_Arming::ARMING_CHECK_RC |
-            AP_Arming::ARMING_CHECK_VOLTAGE |
-            AP_Arming::ARMING_CHECK_BATTERY);
-    AP_Param::set_default_by_name("CIRCLE_RATE", 2.0f);
-    AP_Param::set_default_by_name("ATC_ACCEL_Y_MAX", 110000.0f);
-    AP_Param::set_default_by_name("RC3_TRIM", 1100);
-    AP_Param::set_default_by_name("COMPASS_OFFS_MAX", 1000);
-    AP_Param::set_default_by_name("INS_GYR_CAL", 0);
-    AP_Param::set_default_by_name("MNT1_TYPE", 1);
-    AP_Param::set_default_by_name("MNT1_DEFLT_MODE", MAV_MOUNT_MODE_RC_TARGETING);
-    AP_Param::set_default_by_name("MNT1_RC_RATE", 30);
-    AP_Param::set_default_by_name("RC7_OPTION", 214);   // MOUNT1_YAW
-    AP_Param::set_default_by_name("RC8_OPTION", 213);   // MOUNT1_PITCH
+    AP_Param::set_defaults_from_table(defaults_table, ARRAY_SIZE(defaults_table));
     // We should ignore this parameter since ROVs are neutral buoyancy
     AP_Param::set_by_name("MOT_THST_HOVER", 0.5);
 
@@ -752,10 +800,7 @@ void Sub::convert_old_parameters()
         { Parameters::k_param_attitude_control, 386, AP_PARAM_FLOAT, "ATC_RAT_PIT_FLTE" },
         { Parameters::k_param_attitude_control, 387, AP_PARAM_FLOAT, "ATC_RAT_YAW_FLTE" },
     };
-    uint8_t filt_table_size = ARRAY_SIZE(filt_conversion_info);
-    for (uint8_t i=0; i<filt_table_size; i++) {
-        AP_Param::convert_old_parameters(&filt_conversion_info[i], 1.0f);
-    }
+    AP_Param::convert_old_parameters(&filt_conversion_info[0], ARRAY_SIZE(filt_conversion_info));
 
     SRV_Channels::upgrade_parameters();
 }

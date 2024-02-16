@@ -1,6 +1,20 @@
+#include "AP_Logger_config.h"
+
+#if HAL_LOGGING_ENABLED
+
 #include "AP_Common/AP_FWVersion.h"
 #include "LoggerMessageWriter.h"
 #include <AP_Scheduler/AP_Scheduler.h>
+#include <AP_Vehicle/AP_Vehicle_Type.h>
+#include "AP_Logger.h"
+
+#if HAL_LOGGER_FENCE_ENABLED
+    #include <AC_Fence/AC_Fence.h>
+#endif
+
+#if HAL_LOGGER_RALLY_ENABLED
+#include <AP_Rally/AP_Rally.h>
+#endif
 
 #define FORCE_VERSION_H_INCLUDE
 #include "ap_version.h"
@@ -24,7 +38,7 @@ void LoggerMessageWriter::reset()
 
 bool LoggerMessageWriter::out_of_time_for_writing_messages() const
 {
-#if HAL_SCHEDULER_ENABLED
+#if AP_SCHEDULER_ENABLED
     return AP::scheduler().time_available_usec() < MIN_LOOP_TIME_REMAINING_FOR_MESSAGE_WRITE_US;
 #else
     return false;
@@ -41,7 +55,7 @@ void LoggerMessageWriter_DFLogStart::reset()
 #if AP_MISSION_ENABLED
     _writeentiremission.reset();
 #endif
-#if HAL_RALLY_ENABLED
+#if HAL_LOGGER_RALLY_ENABLED
     _writeallrallypoints.reset();
 #endif
 #if HAL_LOGGER_FENCE_ENABLED
@@ -57,11 +71,11 @@ void LoggerMessageWriter_DFLogStart::reset()
     ap = AP_Param::first(&token, &type, &param_default);
 }
 
-bool LoggerMessageWriter_DFLogStart::out_of_time_for_writing_messages() const
+bool LoggerMessageWriter_DFLogStart::out_of_time_for_writing_messages_df() const
 {
     if (stage == Stage::FORMATS) {
         // write out the FMT messages as fast as we can
-#if HAL_SCHEDULER_ENABLED
+#if AP_SCHEDULER_ENABLED
         return AP::scheduler().time_available_usec() == 0;
 #else
         return false;
@@ -70,11 +84,26 @@ bool LoggerMessageWriter_DFLogStart::out_of_time_for_writing_messages() const
     return LoggerMessageWriter::out_of_time_for_writing_messages();
 }
 
+/*
+  check if we've taken too long in a process() stage
+  return true if we should stop processing now as we are out of time
+ */
+bool LoggerMessageWriter_DFLogStart::check_process_limit(uint32_t start_us)
+{
+    const uint32_t limit_us = 1000U;
+    if (AP_HAL::micros() - start_us > limit_us) {
+        return true;
+    }
+    return false;
+}
+
 void LoggerMessageWriter_DFLogStart::process()
 {
-    if (out_of_time_for_writing_messages()) {
+    if (out_of_time_for_writing_messages_df()) {
         return;
     }
+    // allow any stage to run for max 1ms, to prevent a long loop on arming
+    const uint32_t start_us = AP_HAL::micros();
 
     switch(stage) {
     case Stage::FORMATS:
@@ -84,22 +113,29 @@ void LoggerMessageWriter_DFLogStart::process()
                 return; // call me again!
             }
             next_format_to_send++;
+            if (check_process_limit(start_us)) {
+                return; // call me again!
+            }
         }
         _fmt_done = true;
         stage = Stage::PARMS;
         FALLTHROUGH;
 
-    case Stage::PARMS:
+    case Stage::PARMS: {
         while (ap) {
             if (!_logger_backend->Write_Parameter(ap, token, type, param_default)) {
                 return;
             }
             param_default = AP::logger().quiet_nanf();
             ap = AP_Param::next_scalar(&token, &type, &param_default);
+            if (check_process_limit(start_us)) {
+                return; // call me again!
+            }
         }
 
         _params_done = true;
         stage = Stage::UNITS;
+        }
         FALLTHROUGH;
 
     case Stage::UNITS:
@@ -108,6 +144,9 @@ void LoggerMessageWriter_DFLogStart::process()
                 return; // call me again!
             }
             _next_unit_to_send++;
+            if (check_process_limit(start_us)) {
+                return; // call me again!
+            }
         }
         stage = Stage::MULTIPLIERS;
         FALLTHROUGH;
@@ -118,6 +157,9 @@ void LoggerMessageWriter_DFLogStart::process()
                 return; // call me again!
             }
             _next_multiplier_to_send++;
+            if (check_process_limit(start_us)) {
+                return; // call me again!
+            }
         }
         stage = Stage::UNITS;
         FALLTHROUGH;
@@ -128,6 +170,9 @@ void LoggerMessageWriter_DFLogStart::process()
                 return; // call me again!
             }
             _next_format_unit_to_send++;
+            if (check_process_limit(start_us)) {
+                return; // call me again!
+            }
         }
         stage = Stage::RUNNING_SUBWRITERS;
         FALLTHROUGH;
@@ -147,7 +192,7 @@ void LoggerMessageWriter_DFLogStart::process()
             }
         }
 #endif
-#if HAL_RALLY_ENABLED
+#if HAL_LOGGER_RALLY_ENABLED
         if (!_writeallrallypoints.finished()) {
             _writeallrallypoints.process();
             if (!_writeallrallypoints.finished()) {
@@ -199,7 +244,7 @@ bool LoggerMessageWriter_DFLogStart::writeentiremission()
 }
 #endif
 
-#if HAL_RALLY_ENABLED
+#if HAL_LOGGER_RALLY_ENABLED
 bool LoggerMessageWriter_DFLogStart::writeallrallypoints()
 {
     if (stage != Stage::DONE) {
@@ -295,7 +340,7 @@ void LoggerMessageWriter_WriteSysInfo::process() {
         stage = Stage::RC_PROTOCOL;
         FALLTHROUGH;
 
-    case Stage::RC_PROTOCOL:
+    case Stage::RC_PROTOCOL: {
         const char *prot = hal.rcin->protocol();
         if (prot == nullptr) {
             prot = "None";
@@ -303,11 +348,24 @@ void LoggerMessageWriter_WriteSysInfo::process() {
         if (! _logger_backend->Write_MessageF("RC Protocol: %s", prot)) {
             return; // call me again
         }
+        stage = Stage::RC_OUTPUT;
+        FALLTHROUGH;
+    }
+    case Stage::RC_OUTPUT: {
+        char banner_msg[50];
+        if (hal.rcout->get_output_mode_banner(banner_msg, sizeof(banner_msg))) {
+            if (!_logger_backend->Write_Message(banner_msg)) {
+                return; // call me again
+            }
+        }
+        break;
+    }
     }
 
     _finished = true;  // all done!
 }
 
+#if HAL_LOGGER_RALLY_ENABLED
 void LoggerMessageWriter_WriteAllRallyPoints::process()
 {
     const AP_Rally *_rally = AP::rally();
@@ -357,6 +415,7 @@ void LoggerMessageWriter_WriteAllRallyPoints::reset()
     stage = Stage::WRITE_NEW_RALLY_MESSAGE;
     _rally_number_to_send = 0;
 }
+#endif  // HAL_LOGGER_RALLY_ENABLED
 
 void LoggerMessageWriter_WriteEntireMission::process() {
     const AP_Mission *_mission = AP::mission();
@@ -417,6 +476,7 @@ void LoggerMessageWriter_Write_Polyfence::process() {
 
     AC_Fence *fence = AP::fence();
     if (fence == nullptr) {
+        _finished = true;
         return;
     }
 
@@ -464,3 +524,5 @@ void LoggerMessageWriter_Write_Polyfence::reset()
 }
 #endif // !APM_BUILD_TYPE(APM_BUILD_Replay)
 #endif // AP_FENCE_ENABLED
+
+#endif  // HAL_LOGGING_ENABLED

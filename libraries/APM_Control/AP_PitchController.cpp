@@ -19,6 +19,8 @@
 #include <AP_HAL/AP_HAL.h>
 #include "AP_PitchController.h"
 #include <AP_AHRS/AP_AHRS.h>
+#include <AP_Scheduler/AP_Scheduler.h>
+#include <GCS_MAVLink/GCS.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -65,7 +67,7 @@ const AP_Param::GroupInfo AP_PitchController::var_info[] = {
 
     // @Param: _RATE_P
     // @DisplayName: Pitch axis rate controller P gain
-    // @Description: Pitch axis rate controller P gain.  Converts the difference between desired roll rate and actual roll rate into a motor speed output
+    // @Description: Pitch axis rate controller P gain. Corrects in proportion to the difference between the desired pitch rate vs actual pitch rate
     // @Range: 0.08 0.35
     // @Increment: 0.005
     // @User: Standard
@@ -79,7 +81,7 @@ const AP_Param::GroupInfo AP_PitchController::var_info[] = {
 
     // @Param: _RATE_IMAX
     // @DisplayName: Pitch axis rate controller I gain maximum
-    // @Description: Pitch axis rate controller I gain maximum.  Constrains the maximum motor output that the I gain will output
+    // @Description: Pitch axis rate controller I gain maximum.  Constrains the maximum that the I term will output
     // @Range: 0 1
     // @Increment: 0.01
     // @User: Standard
@@ -129,12 +131,37 @@ const AP_Param::GroupInfo AP_PitchController::var_info[] = {
     // @Increment: 0.5
     // @User: Advanced
 
+    // @Param: _RATE_PDMX
+    // @DisplayName: Pitch axis rate controller PD sum maximum
+    // @Description: Pitch axis rate controller PD sum maximum.  The maximum/minimum value that the sum of the P and D term can output
+    // @Range: 0 1
+    // @Increment: 0.01
+
+    // @Param: _RATE_D_FF
+    // @DisplayName: Pitch Derivative FeedForward Gain
+    // @Description: FF D Gain which produces an output that is proportional to the rate of change of the target
+    // @Range: 0 0.03
+    // @Increment: 0.001
+    // @User: Advanced
+
+    // @Param: _RATE_NTF
+    // @DisplayName: Pitch Target notch filter index
+    // @Description: Pitch Target notch filter index
+    // @Range: 1 8
+    // @User: Advanced
+
+    // @Param: _RATE_NEF
+    // @DisplayName: Pitch Error notch filter index
+    // @Description: Pitch Error notch filter index
+    // @Range: 1 8
+    // @User: Advanced
+
     AP_SUBGROUPINFO(rate_pid, "_RATE_", 11, AP_PitchController, AC_PID),
 
     AP_GROUPEND
 };
 
-AP_PitchController::AP_PitchController(const AP_Vehicle::FixedWing &parms)
+AP_PitchController::AP_PitchController(const AP_FixedWing &parms)
     : aparm(parms)
 {
     AP_Param::setup_object_defaults(this, var_info);
@@ -155,8 +182,6 @@ float AP_PitchController::_get_rate_out(float desired_rate, float scaler, bool d
     float rate_y = _ahrs.get_gyro().y;
     float old_I = rate_pid.get_i();
 
-    rate_pid.set_dt(dt);
-
     bool underspeed = aspeed <= 0.5*float(aparm.airspeed_min);
     if (underspeed) {
         limit_I = true;
@@ -167,7 +192,7 @@ float AP_PitchController::_get_rate_out(float desired_rate, float scaler, bool d
     //
     // note that we run AC_PID in radians so that the normal scaling
     // range for IMAX in AC_PID applies (usually an IMAX value less than 1.0)
-    rate_pid.update_all(radians(desired_rate) * scaler * scaler, rate_y * scaler * scaler, limit_I);
+    rate_pid.update_all(radians(desired_rate) * scaler * scaler, rate_y * scaler * scaler, dt, limit_I);
 
     if (underspeed) {
         // when underspeed we lock the integrator
@@ -177,7 +202,8 @@ float AP_PitchController::_get_rate_out(float desired_rate, float scaler, bool d
     // FF should be scaled by scaler/eas2tas, but since we have scaled
     // the AC_PID target above by scaler*scaler we need to instead
     // divide by scaler*eas2tas to get the right scaling
-    const float ff = degrees(rate_pid.get_ff() / (scaler * eas2tas));
+    const float ff = degrees(ff_scale * rate_pid.get_ff() / (scaler * eas2tas));
+    ff_scale = 1.0;
 
     if (disable_integrator) {
         rate_pid.reset_I();
@@ -192,13 +218,14 @@ float AP_PitchController::_get_rate_out(float desired_rate, float scaler, bool d
     pinfo.P *= deg_scale;
     pinfo.I *= deg_scale;
     pinfo.D *= deg_scale;
+    pinfo.DFF *= deg_scale;
 
     // fix the logged target and actual values to not have the scalers applied
     pinfo.target = desired_rate;
     pinfo.actual = degrees(rate_y);
 
     // sum components
-    float out = pinfo.FF + pinfo.P + pinfo.I + pinfo.D;
+    float out = pinfo.FF + pinfo.P + pinfo.I + pinfo.D + pinfo.DFF;
     if (ground_mode) {
         // when on ground suppress D and half P term to prevent oscillations
         out -= pinfo.D + 0.5*pinfo.P;
@@ -345,7 +372,6 @@ float AP_PitchController::get_servo_out(int32_t angle_err, float scaler, bool di
 
 void AP_PitchController::reset_I()
 {
-    _pid_info.I = 0;
     rate_pid.reset_I();
 }
 

@@ -22,7 +22,6 @@
 // 2 compiled in with dummy methods, none functional, except rover which never uses dummy methods functionality
 
 #include <AP_Param/AP_Param.h>
-#include <AP_SerialManager/AP_SerialManager.h>
 #include <AP_Common/AP_ExpandingArray.h>
 #include <GCS_MAVLink/GCS_MAVLink.h>
 
@@ -126,7 +125,7 @@ private:
     // decode each term
     bool decode_latest_term() WARN_IF_UNUSED;
 
-    // varables for decoding NMEA sentence
+    // variables for decoding NMEA sentence
     char _term[AIVDM_PAYLOAD_SIZE]; // buffer for the current term within the current sentence
     uint8_t _term_offset;           // offset within the _term buffer where the next character should be placed
     uint8_t _term_number;           // term index within the current sentence

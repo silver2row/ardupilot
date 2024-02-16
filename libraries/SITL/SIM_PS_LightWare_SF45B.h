@@ -15,7 +15,7 @@
 /*
   Simulator for the LightWare S45B proximity sensor
 
-./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --uartF=sim:sf45b --speedup=1 -l 51.8752066,14.6487840,54.15,0
+./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:sf45b --speedup=1 -l 51.8752066,14.6487840,54.15,0
 
 param set SERIAL5_PROTOCOL 11  # proximity
 param set PRX1_TYPE 8  # s45b
@@ -57,13 +57,13 @@ namespace SITL {
 class PS_LightWare_SF45B : public PS_LightWare {
 public:
 
+    using PS_LightWare::PS_LightWare;
+
     uint32_t packet_for_location(const Location &location,
                                  uint8_t *data,
                                  uint8_t buflen) override;
 
     void update(const Location &location) override;
-
-    PS_LightWare_SF45B() : PS_LightWare() { }
 
 private:
 
@@ -259,7 +259,8 @@ private:
 
     uint32_t last_scan_output_time_ms;
 
-    float last_degrees_bf;
+    float last_degrees_bf;  // previous iteration's lidar angle
+    float last_dir = 1;     // previous iterations movement direction.  +1 CW, -1 for CCW
 
 };
 

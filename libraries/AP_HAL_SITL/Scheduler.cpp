@@ -276,10 +276,8 @@ void Scheduler::_run_io_procs()
     }
     hal.storage->_timer_tick();
 
-#ifndef HAL_BUILD_AP_PERIPH
     // in lieu of a thread-per-bus:
     ((HALSITL::I2CDeviceManager*)(hal.i2c_mgr))->_timer_tick();
-#endif
 
 #if SITL_STACK_CHECKING_ENABLED
     check_thread_stacks();
@@ -308,6 +306,7 @@ void Scheduler::stop_clock(uint64_t time_usec)
 void *Scheduler::thread_create_trampoline(void *ctx)
 {
     struct thread_attr *a = (struct thread_attr *)ctx;
+    a->thread = pthread_self();
     a->f[0]();
     
     WITH_SEMAPHORE(_thread_sem);
@@ -378,6 +377,11 @@ bool Scheduler::thread_create(AP_HAL::MemberProc proc, const char *name, uint32_
     if (pthread_create(&thread, &a->attr, thread_create_trampoline, a) != 0) {
         goto failed;
     }
+
+#if !defined(__APPLE__)
+    pthread_setname_np(thread, name);
+#endif
+
     a->next = threads;
     threads = a;
     return true;
@@ -407,4 +411,16 @@ void Scheduler::check_thread_stacks(void)
             }
         }
     }
+}
+
+// get the name of the current thread, or nullptr if not known
+const char *Scheduler::get_current_thread_name(void) const
+{
+    const pthread_t self = pthread_self();
+    for (struct thread_attr *a=threads; a; a=a->next) {
+        if (a->thread == self) {
+            return a->name;
+        }
+    }
+    return nullptr;
 }

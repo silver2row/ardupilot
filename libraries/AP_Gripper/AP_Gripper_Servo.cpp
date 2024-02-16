@@ -4,6 +4,7 @@
 
 #include <GCS_MAVLink/GCS.h>
 #include <AP_Logger/AP_Logger.h>
+#include <SRV_Channel/SRV_Channel.h>
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
   #include <SITL/SITL.h>
@@ -28,7 +29,7 @@ void AP_Gripper_Servo::grab()
     // check if we are already grabbed
     if (config.state == AP_Gripper::STATE_GRABBED) {
         // inform user that we are already grabbed
-        gcs().send_text(MAV_SEVERITY_INFO, "Gripper load grabbed");
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper load grabbed");
         return;
     }
 
@@ -38,7 +39,7 @@ void AP_Gripper_Servo::grab()
     // move the servo to the grab position
     SRV_Channels::set_output_pwm(SRV_Channel::k_gripper, config.grab_pwm);
     _last_grab_or_release = AP_HAL::millis();
-    gcs().send_text(MAV_SEVERITY_INFO, "Gripper load grabbing");
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper load grabbing");
     AP::logger().Write_Event(LogEvent::GRIPPER_GRAB);
 }
 
@@ -53,7 +54,7 @@ void AP_Gripper_Servo::release()
     // check if we are already released
     if (config.state == AP_Gripper::STATE_RELEASED) {
         // inform user that we are already released
-        gcs().send_text(MAV_SEVERITY_INFO, "Gripper load released");
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper load released");
         return;
     }
     
@@ -63,7 +64,7 @@ void AP_Gripper_Servo::release()
     // move the servo to the release position
     SRV_Channels::set_output_pwm(SRV_Channel::k_gripper, config.release_pwm);
     _last_grab_or_release = AP_HAL::millis();
-    gcs().send_text(MAV_SEVERITY_INFO, "Gripper load releasing");
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper load releasing");
     AP::logger().Write_Event(LogEvent::GRIPPER_RELEASE);
 }
 

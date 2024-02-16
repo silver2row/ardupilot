@@ -21,9 +21,9 @@
  *       Sensor is initialized in Continuos mode (10Hz)
  *
  */
-#include <AP_HAL/AP_HAL.h>
+#include "AP_Compass_HMC5843.h"
 
-#ifdef HAL_COMPASS_HMC5843_I2C_ADDR
+#if AP_COMPASS_HMC5843_ENABLED
 
 #include <assert.h>
 #include <utility>
@@ -31,15 +31,14 @@
 
 #include <AP_Math/AP_Math.h>
 #include <AP_HAL/utility/sparse-endian.h>
-
-#include "AP_Compass_HMC5843.h"
+#include <AP_HAL/AP_HAL.h>
 #include <AP_InertialSensor/AP_InertialSensor.h>
 #include <AP_InertialSensor/AuxiliaryBus.h>
 
 extern const AP_HAL::HAL& hal;
 
 /*
- * Defaul address: 0x1E
+ * Default address: 0x1E
  */
 
 #define HMC5843_REG_CONFIG_A 0x00
@@ -127,6 +126,7 @@ AP_Compass_Backend *AP_Compass_HMC5843::probe(AP_HAL::OwnPtr<AP_HAL::Device> dev
     return sensor;
 }
 
+#if AP_INERTIALSENSOR_ENABLED
 AP_Compass_Backend *AP_Compass_HMC5843::probe_mpu6000(enum Rotation rotation)
 {
     AP_InertialSensor &ins = *AP_InertialSensor::get_singleton();
@@ -146,6 +146,7 @@ AP_Compass_Backend *AP_Compass_HMC5843::probe_mpu6000(enum Rotation rotation)
 
     return sensor;
 }
+#endif
 
 bool AP_Compass_HMC5843::init()
 {
@@ -489,6 +490,7 @@ AP_HAL::Device::PeriodicHandle AP_HMC5843_BusDriver_HALDevice::register_periodic
 }
 
 
+#if AP_INERTIALSENSOR_ENABLED
 /* HMC5843 on an auxiliary bus of IMU driver */
 AP_HMC5843_BusDriver_Auxiliary::AP_HMC5843_BusDriver_Auxiliary(AP_InertialSensor &ins, uint8_t backend_id,
                                                                uint8_t addr)
@@ -497,14 +499,12 @@ AP_HMC5843_BusDriver_Auxiliary::AP_HMC5843_BusDriver_Auxiliary(AP_InertialSensor
      * Only initialize members. Fails are handled by configure or while
      * getting the semaphore
      */
-#if HAL_INS_ENABLED
     _bus = ins.get_auxiliary_bus(backend_id);
     if (!_bus) {
         return;
     }
 
     _slave = _bus->request_next_slave(addr);
-#endif
 }
 
 AP_HMC5843_BusDriver_Auxiliary::~AP_HMC5843_BusDriver_Auxiliary()
@@ -586,5 +586,6 @@ uint32_t AP_HMC5843_BusDriver_Auxiliary::get_bus_id(void) const
 {
     return _bus->get_bus_id();
 }
+#endif  // AP_INERTIALSENSOR_ENABLED
 
-#endif
+#endif  // AP_COMPASS_HMC5843_ENABLED

@@ -19,6 +19,11 @@
 This provides some support code and variables for MAVLink enabled sketches
 
 */
+
+#include "GCS_config.h"
+
+#if HAL_MAVLINK_BINDINGS_ENABLED
+
 #include "GCS.h"
 #include "GCS_MAVLink.h"
 
@@ -36,6 +41,10 @@ extern const AP_HAL::HAL& hal;
 #pragma GCC diagnostic pop
 #endif
 
+#endif // HAL_MAVLINK_BINDINGS_ENABLED
+
+#if HAL_GCS_ENABLED
+
 AP_HAL::UARTDriver	*mavlink_comm_port[MAVLINK_COMM_NUM_BUFFERS];
 bool gcs_alternative_active[MAVLINK_COMM_NUM_BUFFERS];
 
@@ -47,6 +56,30 @@ mavlink_system_t mavlink_system = {7,1};
 
 // routing table
 MAVLink_routing GCS_MAVLINK::routing;
+
+GCS_MAVLINK *GCS_MAVLINK::find_by_mavtype_and_compid(uint8_t mav_type, uint8_t compid, uint8_t &sysid) {
+    mavlink_channel_t channel;
+    if (!routing.find_by_mavtype_and_compid(mav_type, compid, sysid, channel)) {
+        return nullptr;
+    }
+    return gcs().chan(channel);
+}
+
+mavlink_message_t* mavlink_get_channel_buffer(uint8_t chan) {
+    GCS_MAVLINK *link = gcs().chan(chan);
+    if (link == nullptr) {
+        return nullptr;
+    }
+    return link->channel_buffer();
+}
+
+mavlink_status_t* mavlink_get_channel_status(uint8_t chan) {
+    GCS_MAVLINK *link = gcs().chan(chan);
+    if (link == nullptr) {
+        return nullptr;
+    }
+    return link->channel_status();
+}
 
 // set a channel as private. Private channels get sent heartbeats, but
 // don't get broadcast packets or forwarded packets
@@ -97,7 +130,7 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
 #if HAL_HIGH_LATENCY2_ENABLED
     // if it's a disabled high latency channel, don't send
     GCS_MAVLINK *link = gcs().chan(chan);
-    if (!link->should_send()) {
+    if (link->is_high_latency_link && !gcs().get_high_latency_status()) {
         return;
     }
 #endif
@@ -149,3 +182,5 @@ HAL_Semaphore &comm_chan_lock(mavlink_channel_t chan)
 {
     return chan_locks[uint8_t(chan)];
 }
+
+#endif  // HAL_GCS_ENABLED

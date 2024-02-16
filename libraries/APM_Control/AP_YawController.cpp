@@ -20,6 +20,8 @@
 #include <AP_HAL/AP_HAL.h>
 #include "AP_YawController.h"
 #include <AP_AHRS/AP_AHRS.h>
+#include <GCS_MAVLink/GCS.h>
+#include <AP_Scheduler/AP_Scheduler.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -79,7 +81,7 @@ const AP_Param::GroupInfo AP_YawController::var_info[] = {
 
     // @Param: _RATE_P
     // @DisplayName: Yaw axis rate controller P gain
-    // @Description: Yaw axis rate controller P gain.  Converts the difference between desired yaw rate and actual yaw rate into a motor speed output
+    // @Description: Yaw axis rate controller P gain.  Corrects in proportion to the difference between the desired yaw rate vs actual yaw rate
     // @Range: 0.08 0.35
     // @Increment: 0.005
     // @User: Standard
@@ -93,7 +95,7 @@ const AP_Param::GroupInfo AP_YawController::var_info[] = {
 
     // @Param: _RATE_IMAX
     // @DisplayName: Yaw axis rate controller I gain maximum
-    // @Description: Yaw axis rate controller I gain maximum.  Constrains the maximum motor output that the I gain will output
+    // @Description: Yaw axis rate controller I gain maximum.  Constrains the maximum that the I term will output
     // @Range: 0 1
     // @Increment: 0.01
     // @User: Standard
@@ -143,12 +145,37 @@ const AP_Param::GroupInfo AP_YawController::var_info[] = {
     // @Increment: 0.5
     // @User: Advanced
 
+    // @Param: _RATE_PDMX
+    // @DisplayName: Yaw axis rate controller PD sum maximum
+    // @Description: Yaw axis rate controller PD sum maximum.  The maximum/minimum value that the sum of the P and D term can output
+    // @Range: 0 1
+    // @Increment: 0.01
+
+    // @Param: _RATE_D_FF
+    // @DisplayName: Yaw Derivative FeedForward Gain
+    // @Description: FF D Gain which produces an output that is proportional to the rate of change of the target
+    // @Range: 0 0.03
+    // @Increment: 0.001
+    // @User: Advanced
+
+    // @Param: _RATE_NTF
+    // @DisplayName: Yaw Target notch filter index
+    // @Description: Yaw Target notch filter index
+    // @Range: 1 8
+    // @User: Advanced
+
+    // @Param: _RATE_NEF
+    // @DisplayName: Yaw Error notch filter index
+    // @Description: Yaw Error notch filter index
+    // @Range: 1 8
+    // @User: Advanced
+
     AP_SUBGROUPINFO(rate_pid, "_RATE_", 9, AP_YawController, AC_PID),
 
     AP_GROUPEND
 };
 
-AP_YawController::AP_YawController(const AP_Vehicle::FixedWing &parms)
+AP_YawController::AP_YawController(const AP_FixedWing &parms)
     : aparm(parms)
 {
     AP_Param::setup_object_defaults(this, var_info);
@@ -279,8 +306,6 @@ float AP_YawController::get_rate_out(float desired_rate, float scaler, bool disa
     float aspeed;
     float old_I = rate_pid.get_i();
 
-    rate_pid.set_dt(dt);
-
     if (!_ahrs.airspeed_estimate(aspeed)) {
         aspeed = 0;
     }
@@ -294,7 +319,7 @@ float AP_YawController::get_rate_out(float desired_rate, float scaler, bool disa
     //
     // note that we run AC_PID in radians so that the normal scaling
     // range for IMAX in AC_PID applies (usually an IMAX value less than 1.0)
-    rate_pid.update_all(radians(desired_rate) * scaler * scaler, rate_z * scaler * scaler, limit_I);
+    rate_pid.update_all(radians(desired_rate) * scaler * scaler, rate_z * scaler * scaler, dt, limit_I);
 
     if (underspeed) {
         // when underspeed we lock the integrator
@@ -319,6 +344,7 @@ float AP_YawController::get_rate_out(float desired_rate, float scaler, bool disa
     pinfo.P *= deg_scale;
     pinfo.I *= deg_scale;
     pinfo.D *= deg_scale;
+    pinfo.DFF *= deg_scale;
     pinfo.limit = limit_I;
 
     // fix the logged target and actual values to not have the scalers applied
@@ -326,7 +352,7 @@ float AP_YawController::get_rate_out(float desired_rate, float scaler, bool disa
     pinfo.actual = degrees(rate_z);
 
     // sum components
-    float out = pinfo.FF + pinfo.P + pinfo.I + pinfo.D;
+    float out = pinfo.FF + pinfo.P + pinfo.I + pinfo.D + pinfo.DFF;
 
     // remember the last output to trigger the I limit
     _last_out = out;

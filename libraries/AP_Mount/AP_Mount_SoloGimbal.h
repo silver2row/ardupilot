@@ -5,7 +5,6 @@
 
 
 #include <AP_HAL/AP_HAL.h>
-#include <AP_AHRS/AP_AHRS.h>
 
 #include "AP_Mount_Backend.h"
 #if HAL_SOLO_GIMBAL_ENABLED
@@ -55,7 +54,6 @@ private:
     void Log_Write_Gimbal(SoloGimbal &gimbal);
 
     bool _params_saved;
-    MountTarget _angle_rad;         // angle target
     SoloGimbal _gimbal;
 };
 

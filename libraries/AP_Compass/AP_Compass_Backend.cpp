@@ -74,7 +74,7 @@ void AP_Compass_Backend::correct_field(Vector3f &mag, uint8_t i)
     Compass::mag_state &state = _compass._state[Compass::StateIndex(i)];
 
     const Vector3f &offsets = state.offset.get();
-#ifndef HAL_BUILD_AP_PERIPH
+#if AP_COMPASS_DIAGONALS_ENABLED
     const Vector3f &diagonals = state.diagonals.get();
     const Vector3f &offdiagonals = state.offdiagonals.get();
 #endif
@@ -88,15 +88,17 @@ void AP_Compass_Backend::correct_field(Vector3f &mag, uint8_t i)
         mag *= state.scale_factor;
     }
 
-#ifndef HAL_BUILD_AP_PERIPH
-    // apply eliptical correction
-    Matrix3f mat(
-        diagonals.x, offdiagonals.x, offdiagonals.y,
-        offdiagonals.x,    diagonals.y, offdiagonals.z,
-        offdiagonals.y, offdiagonals.z,    diagonals.z
-    );
+#if AP_COMPASS_DIAGONALS_ENABLED
+    // apply elliptical correction
+    if (!diagonals.is_zero()) {
+        Matrix3f mat(
+            diagonals.x,    offdiagonals.x, offdiagonals.y,
+            offdiagonals.x, diagonals.y,    offdiagonals.z,
+            offdiagonals.y, offdiagonals.z, diagonals.z
+            );
 
-    mag = mat * mag;
+        mag = mat * mag;
+    }
 #endif
 
 #if COMPASS_MOT_ENABLED
@@ -121,7 +123,7 @@ void AP_Compass_Backend::correct_field(Vector3f &mag, uint8_t i)
     }
 
     /*
-      we apply the motor offsets after we apply the eliptical
+      we apply the motor offsets after we apply the elliptical
       correction. This is needed to match the way that the motor
       compensation values are calculated, as they are calculated based
       on final field outputs, not on the raw outputs
@@ -249,7 +251,7 @@ void AP_Compass_Backend::set_rotation(uint8_t instance, enum Rotation rotation)
 static constexpr float FILTER_KOEF = 0.1f;
 
 /* Check that the compass value is valid by using a mean filter. If
- * the value is further than filtrer_range from mean value, it is
+ * the value is further than filter_range from mean value, it is
  * rejected. 
 */
 bool AP_Compass_Backend::field_ok(const Vector3f &field)

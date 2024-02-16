@@ -35,7 +35,8 @@ private:
         VER,  // i.e. the "VER" message
         SYSTEM_ID,
         PARAM_SPACE_USED,
-        RC_PROTOCOL
+        RC_PROTOCOL,
+        RC_OUTPUT,
     };
     Stage stage;
 };
@@ -109,7 +110,7 @@ public:
         {
         }
 
-    virtual void set_logger_backend(class AP_Logger_Backend *backend) override {
+    void set_logger_backend(class AP_Logger_Backend *backend) override final {
         LoggerMessageWriter::set_logger_backend(backend);
         _writesysinfo.set_logger_backend(backend);
 #if AP_MISSION_ENABLED
@@ -123,7 +124,7 @@ public:
 #endif
     }
 
-    bool out_of_time_for_writing_messages() const;
+    bool out_of_time_for_writing_messages_df() const;
 
     void reset() override;
     void process() override;
@@ -143,6 +144,9 @@ public:
 #endif
 
 private:
+
+    // check for using too much time
+    static bool check_process_limit(uint32_t start_us);
 
     enum class Stage {
         FORMATS = 0,

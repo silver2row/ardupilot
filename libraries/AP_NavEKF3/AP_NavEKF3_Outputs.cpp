@@ -88,7 +88,7 @@ bool NavEKF3_core::getHeightControlLimit(float &height) const
 // return the Euler roll, pitch and yaw angle in radians
 void NavEKF3_core::getEulerAngles(Vector3f &euler) const
 {
-    outputDataNew.quat.to_euler(euler.x, euler.y, euler.z);
+    outputDataNew.quat.to_euler(euler);
     euler = euler - dal.get_trim();
 }
 
@@ -179,12 +179,14 @@ void NavEKF3_core::getVelNED(Vector3f &vel) const
 // returns false if estimate is unavailable
 bool NavEKF3_core::getAirSpdVec(Vector3f &vel) const
 {
-    if (inhibitWindStates || PV_AidingMode == AID_NONE) {
+    if (PV_AidingMode == AID_NONE) {
         return false;
     }
     vel = (outputDataNew.velocity + velOffsetNED).tofloat();
-    vel.x -= stateStruct.wind_vel.x;
-    vel.y -= stateStruct.wind_vel.y;
+    if (!inhibitWindStates) {
+        vel.x -= stateStruct.wind_vel.x;
+        vel.y -= stateStruct.wind_vel.y;
+    }
     Matrix3f Tnb; // rotation from nav to body frame
     outputDataNew.quat.inverse().rotation_matrix(Tnb);
     vel = Tnb * vel;
@@ -230,14 +232,16 @@ bool NavEKF3_core::getPosNE(Vector2f &posNE) const
             auto &gps = dal.gps();
             if ((gps.status(selected_gps) >= AP_DAL_GPS::GPS_OK_FIX_2D)) {
                 // If the origin has been set and we have GPS, then return the GPS position relative to the origin
-                const struct Location &gpsloc = gps.location(selected_gps);
+                const Location &gpsloc = gps.location(selected_gps);
                 posNE = public_origin.get_distance_NE_ftype(gpsloc).tofloat();
                 return false;
-            } else if (rngBcnAlignmentStarted) {
+#if EK3_FEATURE_BEACON_FUSION
+            } else if (rngBcn.alignmentStarted) {
                 // If we are attempting alignment using range beacon data, then report the position
-                posNE.x = receiverPos.x;
-                posNE.y = receiverPos.y;
+                posNE.x = rngBcn.receiverPos.x;
+                posNE.y = rngBcn.receiverPos.y;
                 return false;
+#endif
             } else {
                 // If no GPS fix is available, all we can do is provide the last known position
                 posNE = outputDataNew.position.xy().tofloat();
@@ -252,9 +256,9 @@ bool NavEKF3_core::getPosNE(Vector2f &posNE) const
     return false;
 }
 
-// Write the last calculated D position of the body frame origin relative to the EKF origin (m).
+// Write the last calculated D position of the body frame origin relative to the EKF local origin
 // Return true if the estimate is valid
-bool NavEKF3_core::getPosD(float &posD) const
+bool NavEKF3_core::getPosD_local(float &posD) const
 {
     // The EKF always has a height estimate regardless of mode of operation
     // Correct for the IMU offset (EKF calculations are at the IMU)
@@ -268,15 +272,24 @@ bool NavEKF3_core::getPosD(float &posD) const
         posD = outputDataNew.position.z + posOffsetNED.z + 0.01f * (float)EKF_origin.alt - (float)ekfGpsRefHgt;
     }
 
+    // Return the current height solution status
+    return filterStatus.flags.vert_pos;
+
+}
+
+// Write the last calculated D position of the body frame origin relative to the public origin
+// Return true if the estimate is valid
+bool NavEKF3_core::getPosD(float &posD) const
+{
+    bool ret = getPosD_local(posD);
+
     // adjust posD for difference between our origin and the public_origin
     Location local_origin;
     if (getOriginLLH(local_origin)) {
         posD += (public_origin.alt - local_origin.alt) * 0.01;
     }
 
-    // Return the current height solution status
-    return filterStatus.flags.vert_pos;
-
+    return ret;
 }
 
 // return the estimated height of body frame origin above ground level
@@ -291,12 +304,12 @@ bool NavEKF3_core::getHAGL(float &HAGL) const
 // If a calculated location isn't available, return a raw GPS measurement
 // The status will return true if a calculation or raw measurement is available
 // The getFilterStatus() function provides a more detailed description of data health and must be checked if data is to be used for flight control
-bool NavEKF3_core::getLLH(struct Location &loc) const
+bool NavEKF3_core::getLLH(Location &loc) const
 {
     Location origin;
     if (getOriginLLH(origin)) {
         float posD;
-        if(getPosD(posD) && PV_AidingMode != AID_NONE) {
+        if (getPosD_local(posD) && PV_AidingMode != AID_NONE) {
             // Altitude returned is an absolute altitude relative to the WGS-84 spherioid
             loc.set_alt_cm(origin.alt - posD*100.0, Location::AltFrame::ABSOLUTE);
             if (filterStatus.flags.horiz_pos_abs || filterStatus.flags.horiz_pos_rel) {
@@ -338,7 +351,7 @@ bool NavEKF3_core::getLLH(struct Location &loc) const
     }
 }
 
-bool NavEKF3_core::getGPSLLH(struct Location &loc) const
+bool NavEKF3_core::getGPSLLH(Location &loc) const
 {
     const auto &gps = dal.gps();
     if ((gps.status(selected_gps) >= AP_DAL_GPS::GPS_OK_FIX_3D)) {
@@ -371,7 +384,7 @@ void NavEKF3_core::getEkfControlLimits(float &ekfGndSpdLimit, float &ekfNavVelGa
 
 
 // return the LLH location of the filters NED origin
-bool NavEKF3_core::getOriginLLH(struct Location &loc) const
+bool NavEKF3_core::getOriginLLH(Location &loc) const
 {
     if (validOrigin) {
         loc = public_origin;
@@ -608,7 +621,7 @@ void NavEKF3_core::send_status_report(GCS_MAVLINK &link) const
         velVar,
         posVar,
         hgtVar,
-        fmaxF(fmaxF(magVar.x,magVar.y),magVar.z),
+        fmaxf(fmaxf(magVar.x,magVar.y),magVar.z),
         temp,
         flags,
         tasVar

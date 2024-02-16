@@ -1,12 +1,6 @@
 #pragma once
 
-#include <AP_HAL/AP_HAL.h>
-
-#if defined(NUM_SERVO_CHANNELS) && NUM_SERVO_CHANNELS == 0
-#define HAL_WITH_ESC_TELEM 0
-#elif !defined(HAL_WITH_ESC_TELEM)
-#define HAL_WITH_ESC_TELEM (HAL_SUPPORT_RCOUT_SERIAL || HAL_MAX_CAN_PROTOCOL_DRIVERS) && !defined(HAL_BUILD_AP_PERIPH)
-#endif
+#include "AP_ESC_Telem_config.h"
 
 #if HAL_WITH_ESC_TELEM
 
@@ -25,14 +19,18 @@ public:
         uint32_t last_update_ms;    // last update time in milliseconds, determines whether active
         uint16_t types;             // telemetry types present
         uint16_t count;             // number of times updated
+
+        // return true if the data is stale
+        bool stale(uint32_t now_ms=0) const volatile;
     };
 
     struct RpmData {
         float    rpm;               // rpm
         float    prev_rpm;          // previous rpm
         float    error_rate;        // error rate in percent
-        uint32_t last_update_us;    // last update time, determines whether active
+        uint32_t last_update_us;    // last update time, greater then 0 means we've gotten data at some point
         float    update_rate_hz;
+        bool     data_valid;        // if this isn't set to true, then the ESC data should be ignored
     };
 
     enum TelemetryType {
@@ -41,7 +39,9 @@ public:
         VOLTAGE     = 1 << 2,
         CURRENT     = 1 << 3,
         CONSUMPTION = 1 << 4,
-        USAGE       = 1 << 5
+        USAGE       = 1 << 5,
+        TEMPERATURE_EXTERNAL = 1 << 6,
+        MOTOR_TEMPERATURE_EXTERNAL  = 1 << 7,
     };
 
 

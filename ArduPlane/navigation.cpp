@@ -58,7 +58,7 @@ void Plane::loiter_angle_update(void)
             }
         }
         if (terrain_status_ok &&
-            fabsf(altitude_agl - target_altitude.terrain_alt_cm*0.01) < 5) {
+            fabsF(altitude_agl - target_altitude.terrain_alt_cm*0.01) < 5) {
             reached_target_alt = true;
         } else
 #endif
@@ -73,7 +73,7 @@ void Plane::loiter_angle_update(void)
         loiter.next_sum_lap_cd = loiter.sum_cd + lap_check_interval_cd;
 
     } else if (!loiter.reached_target_alt && labs(loiter.sum_cd) >= loiter.next_sum_lap_cd) {
-        // check every few laps for scenario where up/downdrafts inhibit you from loitering up/down for too long
+        // check every few laps for scenario where up/downward inhibit you from loitering up/down for too long
         loiter.unable_to_acheive_target_alt = labs(current_loc.alt - loiter.start_lap_alt_cm) < 500;
         loiter.start_lap_alt_cm = current_loc.alt;
         loiter.next_sum_lap_cd += lap_check_interval_cd;
@@ -94,6 +94,8 @@ void Plane::navigate()
     if (next_WP_loc.lat == 0 && next_WP_loc.lng == 0) {
         return;
     }
+
+    check_home_alt_change();
 
     // waypoint distance from plane
     // ----------------------------
@@ -143,9 +145,9 @@ void Plane::calc_airspeed_errors()
     // Get the airspeed_estimate, update smoothed airspeed estimate
     // NOTE:  we use the airspeed estimate function not direct sensor
     //        as TECS may be using synthetic airspeed
-    float airspeed_measured = 0;
+    float airspeed_measured = 0.1;
     if (ahrs.airspeed_estimate(airspeed_measured)) {
-        smoothed_airspeed = smoothed_airspeed * 0.8f + airspeed_measured * 0.2f;
+        smoothed_airspeed = MAX(0.1, smoothed_airspeed * 0.8f + airspeed_measured * 0.2f);
     }
 
     // low pass filter speed scaler, with 1Hz cutoff, at 10Hz
@@ -157,9 +159,9 @@ void Plane::calc_airspeed_errors()
 
     // FBW_B/cruise airspeed target
     if (!failsafe.rc_failsafe && (control_mode == &mode_fbwb || control_mode == &mode_cruise)) {
-        if (g2.flight_options & FlightOptions::CRUISE_TRIM_AIRSPEED) {
+        if (flight_option_enabled(FlightOptions::CRUISE_TRIM_AIRSPEED)) {
             target_airspeed_cm = aparm.airspeed_cruise_cm;
-        } else if (g2.flight_options & FlightOptions::CRUISE_TRIM_THROTTLE) {
+        } else if (flight_option_enabled(FlightOptions::CRUISE_TRIM_THROTTLE)) {
             float control_min = 0.0f;
             float control_mid = 0.0f;
             const float control_max = channel_throttle->get_range();
@@ -186,7 +188,7 @@ void Plane::calc_airspeed_errors()
                                   get_throttle_input()) + ((int32_t)aparm.airspeed_min * 100);
         }
 #if OFFBOARD_GUIDED == ENABLED
-    } else if (control_mode == &mode_guided && guided_state.target_airspeed_cm >  0.0) { // if offbd guided speed change cmd not set, then this section is skipped
+    } else if (control_mode == &mode_guided && guided_state.target_airspeed_cm >  0.0) { // if offboard guided speed change cmd not set, then this section is skipped
         // offboard airspeed demanded
         uint32_t now = AP_HAL::millis();
         float delta = 1e-3f * (now - guided_state.target_airspeed_time_ms);
@@ -224,7 +226,7 @@ void Plane::calc_airspeed_errors()
         }
 #endif
 
-    } else if (flight_stage == AP_Vehicle::FixedWing::FLIGHT_LAND) {
+    } else if (flight_stage == AP_FixedWing::FlightStage::LAND) {
         // Landing airspeed target
         target_airspeed_cm = landing.get_target_airspeed_cm();
     } else if (control_mode == &mode_guided && new_airspeed_cm > 0) { //DO_CHANGE_SPEED overrides onboard guided speed commands, user would have re-enter guided mode to revert
@@ -244,9 +246,10 @@ void Plane::calc_airspeed_errors()
     // but only when this is faster than the target airspeed commanded
     // above.
     if (control_mode->does_auto_throttle() &&
-    	aparm.min_gndspeed_cm > 0 &&
-    	control_mode != &mode_circle) {
-        int32_t min_gnd_target_airspeed = airspeed_measured*100 + groundspeed_undershoot;
+        groundspeed_undershoot_is_valid &&
+        control_mode != &mode_circle) {
+        float EAS_undershoot = (int32_t)((float)groundspeed_undershoot / ahrs.get_EAS2TAS());
+        int32_t min_gnd_target_airspeed = airspeed_measured*100 + EAS_undershoot;
         if (min_gnd_target_airspeed > target_airspeed_cm) {
             target_airspeed_cm = min_gnd_target_airspeed;
         }
@@ -276,16 +279,18 @@ void Plane::calc_gndspeed_undershoot()
 {
     // Use the component of ground speed in the forward direction
     // This prevents flyaway if wind takes plane backwards
-    if (gps.status() >= AP_GPS::GPS_OK_FIX_2D) {
-	      Vector2f gndVel = ahrs.groundspeed_vector();
+    Vector3f velNED;
+    if (ahrs.have_inertial_nav() && ahrs.get_velocity_NED(velNED)) {
         const Matrix3f &rotMat = ahrs.get_rotation_body_to_ned();
         Vector2f yawVect = Vector2f(rotMat.a.x,rotMat.b.x);
         if (!yawVect.is_zero()) {
             yawVect.normalize();
-            float gndSpdFwd = yawVect * gndVel;
-            groundspeed_undershoot = (aparm.min_gndspeed_cm > 0) ? (aparm.min_gndspeed_cm - gndSpdFwd*100) : 0;
+            float gndSpdFwd = yawVect * velNED.xy();
+            groundspeed_undershoot_is_valid = aparm.min_gndspeed_cm > 0;
+            groundspeed_undershoot = groundspeed_undershoot_is_valid ? (aparm.min_gndspeed_cm - gndSpdFwd*100) : 0;
         }
     } else {
+        groundspeed_undershoot_is_valid = false;
         groundspeed_undershoot = 0;
     }
 }
@@ -343,6 +348,9 @@ void Plane::update_loiter(uint16_t radius)
             loiter.direction = (aparm.loiter_radius < 0) ? -1 : 1;
         }
     }
+
+    // the radius actually being used by the controller is required by other functions
+    loiter.radius = (float)radius;
 
     update_loiter_update_nav(radius);
 
@@ -411,7 +419,7 @@ void Plane::update_fbwb_speed_height(void)
         target_altitude.last_elevator_input = elevator_input;
     }
 
-    check_fbwb_minimum_altitude();
+    check_fbwb_altitude();
 
     altitude_error_cm = calc_altitude_error_cm();
 

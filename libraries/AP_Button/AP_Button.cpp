@@ -101,31 +101,25 @@ const AP_Param::GroupInfo AP_Button::var_info[] = {
     AP_GROUPINFO("OPTIONS4",  9, AP_Button, options[3], 0),
 
     // @Param: FUNC1
+    // @CopyFieldsFrom: RC1_OPTION
     // @DisplayName: Button Pin 1 RC Channel function
     // @Description: Auxiliary RC Options function executed on pin change
-    // @CopyValuesFrom: RC1_OPTION
     // @User: Standard
     AP_GROUPINFO("FUNC1",  10, AP_Button, pin_func[0], (uint16_t)RC_Channel::AUX_FUNC::DO_NOTHING),
 
     // @Param: FUNC2
+    // @CopyFieldsFrom: BTN_FUNC1
     // @DisplayName: Button Pin 2 RC Channel function
-    // @Description: Auxiliary RC Options function executed on pin change
-    // @CopyValuesFrom: RC1_OPTION
-    // @User: Standard
     AP_GROUPINFO("FUNC2",  11, AP_Button, pin_func[1], (uint16_t)RC_Channel::AUX_FUNC::DO_NOTHING),
 
     // @Param: FUNC3
+    // @CopyFieldsFrom: BTN_FUNC1
     // @DisplayName: Button Pin 3 RC Channel function
-    // @Description: Auxiliary RC Options function executed on pin change
-    // @CopyValuesFrom: RC1_OPTION
-    // @User: Standard
     AP_GROUPINFO("FUNC3",  12, AP_Button, pin_func[2], (uint16_t)RC_Channel::AUX_FUNC::DO_NOTHING),
 
     // @Param: FUNC4
+    // @CopyFieldsFrom: BTN_FUNC1
     // @DisplayName: Button Pin 4 RC Channel function
-    // @Description: Auxiliary RC Options function executed on pin change
-    // @CopyValuesFrom: RC1_OPTION
-    // @User: Standard
     AP_GROUPINFO("FUNC4",  13, AP_Button, pin_func[3], (uint16_t)RC_Channel::AUX_FUNC::DO_NOTHING),
 
     AP_GROUPEND    
@@ -218,6 +212,7 @@ void AP_Button::update(void)
         pwm_start_debounce_ms = now_ms;
     }
 
+#if HAL_GCS_ENABLED
     if (last_debounce_ms != 0 &&
         (AP_HAL::millis() - last_report_ms) > AP_BUTTON_REPORT_PERIOD_MS &&
         (AP_HAL::millis64() - last_debounce_ms) < report_send_time*1000ULL) {
@@ -227,6 +222,7 @@ void AP_Button::update(void)
         // send a report to GCS
         send_report();
     }
+#endif
 
     if (!aux_functions_initialised) {
         run_aux_functions(true);
@@ -276,10 +272,10 @@ void AP_Button::run_aux_functions(bool force)
 
         const RC_Channel::AuxSwitchPos pos = value ? RC_Channel::AuxSwitchPos::HIGH : RC_Channel::AuxSwitchPos::LOW;
         // I wonder if we can do better here:
-#if !HAL_MINIMIZE_FEATURES
+#if AP_RC_CHANNEL_AUX_FUNCTION_STRINGS_ENABLED
         const char *str = rc_channel->string_for_aux_function(func);
         if (str != nullptr) {
-            gcs().send_text(MAV_SEVERITY_INFO, "Button: executing (%s)", str);
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Button %i: executing (%s %s)", i+1, str, rc_channel->string_for_aux_pos(pos));
         }
 #endif
         rc_channel->run_aux_function(func, pos, RC_Channel::AuxFuncTriggerSource::BUTTON);
@@ -344,6 +340,7 @@ void AP_Button::timer_update(void)
     }
 }
 
+#if HAL_GCS_ENABLED
 /*
   send a BUTTON_CHANGE report to the GCS
  */
@@ -358,6 +355,7 @@ void AP_Button::send_report(void) const
     gcs().send_to_active_channels(MAVLINK_MSG_ID_BUTTON_CHANGE,
                                   (const char *)&packet);
 }
+#endif
 
 /*
   setup the pins as input with pullup. We need pullup to give reliable

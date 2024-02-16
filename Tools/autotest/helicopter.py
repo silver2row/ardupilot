@@ -5,12 +5,16 @@ AP_FLAKE8_CLEAN
 '''
 
 from __future__ import print_function
+
 from arducopter import AutoTestCopter
-from common import AutoTest
-from common import NotAchievedException, AutoTestTimeoutException
+
+import vehicle_test_suite
+from vehicle_test_suite import NotAchievedException, AutoTestTimeoutException
 
 from pymavlink import mavutil
 from pysim import vehicleinfo
+
+import copy
 
 
 class AutoTestHelicopter(AutoTestCopter):
@@ -150,13 +154,22 @@ class AutoTestHelicopter(AutoTestCopter):
         self.progress("Raising rotor speed")
         self.set_rc(8, 2000)
         self.progress("wait for rotor runup to complete")
-        self.wait_servo_channel_value(8, 1660, timeout=10)
+        if self.get_parameter("H_RSC_MODE") == 4:
+            self.context_collect('STATUSTEXT')
+            self.wait_statustext("Governor Engaged", check_context=True)
+        elif self.get_parameter("H_RSC_MODE") == 3:
+            self.wait_rpm(1, 1300, 1400)
+        else:
+            self.wait_servo_channel_value(8, 1659, timeout=10)
+
+        # wait for motor runup
+        self.delay_sim_time(20)
 
         if mode == 'GUIDED':
             self.user_takeoff(alt_min=alt_min)
         else:
             self.set_rc(3, takeoff_throttle)
-        self.wait_for_alt(alt_min=alt_min, timeout=timeout)
+        self.wait_altitude(alt_min-1, alt_min+5, relative=True, timeout=timeout)
         self.hover()
         self.progress("TAKEOFF COMPLETE")
 
@@ -183,7 +196,7 @@ class AutoTestHelicopter(AutoTestCopter):
             # to carry the path to the JSON.
             actual_model = model.split(":")[0]
             defaults = self.model_defaults_filepath(actual_model)
-            if type(defaults) != list:
+            if not isinstance(defaults, list):
                 defaults = [defaults]
             self.customise_SITL_commandline(
                 ["--defaults", ','.join(defaults), ],
@@ -193,6 +206,18 @@ class AutoTestHelicopter(AutoTestCopter):
             self.takeoff(10)
             self.do_RTL()
             self.set_rc(8, 1000)
+
+    def governortest(self):
+        '''Test Heli Internal Throttle Curve and Governor'''
+        self.customise_SITL_commandline(
+            ["--defaults", ','.join(self.model_defaults_filepath('heli-gas')), ],
+            model="heli-gas",
+            wipe=True,
+        )
+        self.set_parameter("H_RSC_MODE", 4)
+        self.takeoff(10)
+        self.do_RTL()
+        self.set_rc(8, 1000)
 
     def hover(self):
         self.progress("Setting hover collective")
@@ -214,7 +239,7 @@ class AutoTestHelicopter(AutoTestCopter):
             self.progress("Raising rotor speed")
             self.set_rc(8, 2000)
             self.progress("wait for rotor runup to complete")
-            self.wait_servo_channel_value(8, 1660, timeout=10)
+            self.wait_servo_channel_value(8, 1659, timeout=10)
             self.delay_sim_time(20)
             # check we are still on the ground...
             m = self.mav.recv_match(type='GLOBAL_POSITION_INT', blocking=True)
@@ -273,14 +298,14 @@ class AutoTestHelicopter(AutoTestCopter):
             self.arm_vehicle()
             self.set_rc(8, 2000)
             self.progress("wait for rotor runup to complete")
-            self.wait_servo_channel_value(8, 1660, timeout=10)
+            self.wait_servo_channel_value(8, 1659, timeout=10)
             self.delay_sim_time(20)
             # check we are still on the ground...
             m = self.mav.recv_match(type='GLOBAL_POSITION_INT', blocking=True)
             if abs(m.relative_alt) > 100:
                 raise NotAchievedException("Took off prematurely")
             self.progress("Pushing throttle past half-way")
-            self.set_rc(3, 1600)
+            self.set_rc(3, 1650)
 
             self.progress("Monitoring takeoff")
             self.wait_altitude(6.9, 8, relative=True)
@@ -331,7 +356,7 @@ class AutoTestHelicopter(AutoTestCopter):
         self.arm_vehicle()
         self.set_rc(8, 2000)
         self.progress("wait for rotor runup to complete")
-        self.wait_servo_channel_value(8, 1660, timeout=10)
+        self.wait_servo_channel_value(8, 1659, timeout=10)
         self.delay_sim_time(20)
         self.set_rc(3, 2000)
         self.wait_altitude(start_alt - 1,
@@ -349,6 +374,287 @@ class AutoTestHelicopter(AutoTestCopter):
         if speed > 30:
             raise NotAchievedException("Hit too hard")
         self.wait_disarmed()
+
+    def ManAutoRotation(self, timeout=600):
+        """Check autorotation power recovery behaviour"""
+        RAMP_TIME = 4
+        AROT_RAMP_TIME = 2
+        self.set_parameter("H_RSC_AROT_MN_EN", 1)
+        self.set_parameter("H_RSC_AROT_ENG_T", AROT_RAMP_TIME)
+        self.set_parameter("H_RSC_AROT_IDLE", 20)
+        self.set_parameter("H_RSC_RAMP_TIME", RAMP_TIME)
+        self.set_parameter("H_RSC_IDLE", 0)
+        start_alt = 100 # metres
+        self.set_parameter("PILOT_TKOFF_ALT", start_alt * 100)
+        self.change_mode('POSHOLD')
+        self.set_rc(3, 1000)
+        self.set_rc(8, 1000)
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.set_rc(8, 2000)
+        self.progress("wait for rotor runup to complete")
+        self.wait_servo_channel_value(8, 1659, timeout=10)
+        self.delay_sim_time(20)
+        self.set_rc(3, 2000)
+        self.wait_altitude(start_alt - 1,
+                           (start_alt + 5),
+                           relative=True,
+                           timeout=timeout)
+        self.context_collect('STATUSTEXT')
+        self.change_mode('STABILIZE')
+        self.progress("Triggering manual autorotation by disabling interlock")
+        self.set_rc(3, 1000)
+        self.set_rc(8, 1000)
+        self.wait_servo_channel_value(8, 1199, timeout=3)
+        self.progress("channel 8 set to autorotation window")
+
+        # wait to establish autorotation
+        self.delay_sim_time(2)
+
+        self.set_rc(8, 2000)
+        self.wait_servo_channel_value(8, 1659, timeout=AROT_RAMP_TIME * 1.1)
+
+        # give time for engine to power up
+        self.set_rc(3, 1400)
+        self.delay_sim_time(2)
+
+        self.progress("in-flight power recovery")
+        self.set_rc(3, 1500)
+        self.delay_sim_time(5)
+
+        # initiate autorotation again
+        self.set_rc(3, 1000)
+        self.set_rc(8, 1000)
+
+        self.wait_statustext(r"SIM Hit ground at ([0-9.]+) m/s",
+                             check_context=True,
+                             regex=True)
+        speed = float(self.re_match.group(1))
+        if speed > 30:
+            raise NotAchievedException("Hit too hard")
+
+        self.set_rc(3, 1000)
+        # verify servo 8 resets to RSC_IDLE after land complete
+        self.wait_servo_channel_value(8, 1000, timeout=3)
+        self.wait_disarmed()
+
+    def mission_item_home(self, target_system, target_component):
+        '''returns a mission_item_int which can be used as home in a mission'''
+        return self.mav.mav.mission_item_int_encode(
+            target_system,
+            target_component,
+            0, # seq
+            mavutil.mavlink.MAV_FRAME_GLOBAL_INT,
+            mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+            0, # current
+            0, # autocontinue
+            3, # p1
+            0, # p2
+            0, # p3
+            0, # p4
+            int(1.0000 * 1e7), # latitude
+            int(2.0000 * 1e7), # longitude
+            31.0000, # altitude
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
+
+    def mission_item_takeoff(self, target_system, target_component):
+        '''returns a mission_item_int which can be used as takeoff in a mission'''
+        return self.mav.mav.mission_item_int_encode(
+            target_system,
+            target_component,
+            1, # seq
+            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
+            0, # current
+            0, # autocontinue
+            0, # p1
+            0, # p2
+            0, # p3
+            0, # p4
+            int(1.0000 * 1e7), # latitude
+            int(1.0000 * 1e7), # longitude
+            31.0000, # altitude
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
+
+    def mission_item_rtl(self, target_system, target_component):
+        '''returns a mission_item_int which can be used as takeoff in a mission'''
+        return self.mav.mav.mission_item_int_encode(
+            target_system,
+            target_component,
+            1, # seq
+            mavutil.mavlink.MAV_FRAME_GLOBAL,
+            mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH,
+            0, # current
+            0, # autocontinue
+            0, # p1
+            0, # p2
+            0, # p3
+            0, # p4
+            0, # latitude
+            0, # longitude
+            0.0000, # altitude
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
+
+    def scurve_nasty_mission(self, target_system=1, target_component=1):
+        '''returns a mission which attempts to give the SCurve library
+        indigestion.  The same destination is given several times.'''
+
+        wp2_loc = self.mav.location()
+        wp2_offset_n = 20
+        wp2_offset_e = 30
+        self.location_offset_ne(wp2_loc, wp2_offset_n, wp2_offset_e)
+
+        wp2_by_three = self.mav.mav.mission_item_int_encode(
+            target_system,
+            target_component,
+            2, # seq
+            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+            0, # current
+            0, # autocontinue
+            3, # p1
+            0, # p2
+            0, # p3
+            0, # p4
+            int(wp2_loc.lat * 1e7), # latitude
+            int(wp2_loc.lng * 1e7), # longitude
+            31.0000, # altitude
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
+
+        wp5_loc = self.mav.location()
+        wp5_offset_n = -20
+        wp5_offset_e = 30
+        self.location_offset_ne(wp5_loc, wp5_offset_n, wp5_offset_e)
+
+        wp5_by_three = self.mav.mav.mission_item_int_encode(
+            target_system,
+            target_component,
+            5, # seq
+            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            mavutil.mavlink.MAV_CMD_NAV_SPLINE_WAYPOINT,
+            0, # current
+            0, # autocontinue
+            3, # p1
+            0, # p2
+            0, # p3
+            0, # p4
+            int(wp5_loc.lat * 1e7), # latitude
+            int(wp5_loc.lng * 1e7), # longitude
+            31.0000, # altitude
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
+
+        ret = copy.copy([
+            # slot 0 is home
+            self.mission_item_home(target_system=target_system, target_component=target_component),
+            # slot 1 is takeoff
+            self.mission_item_takeoff(target_system=target_system, target_component=target_component),
+            # now three spline waypoints right on top of one another:
+            copy.copy(wp2_by_three),
+            copy.copy(wp2_by_three),
+            copy.copy(wp2_by_three),
+            # now three MORE spline waypoints right on top of one another somewhere else:
+            copy.copy(wp5_by_three),
+            copy.copy(wp5_by_three),
+            copy.copy(wp5_by_three),
+            self.mission_item_rtl(target_system=target_system, target_component=target_component),
+        ])
+        self.correct_wp_seq_numbers(ret)
+        return ret
+
+    def scurve_nasty_up_mission(self, target_system=1, target_component=1):
+        '''returns a mission which attempts to give the SCurve library
+        indigestion.  The same destination is given several times but with differing altitudes.'''
+
+        wp2_loc = self.mav.location()
+        wp2_offset_n = 20
+        wp2_offset_e = 30
+        self.location_offset_ne(wp2_loc, wp2_offset_n, wp2_offset_e)
+
+        wp2 = self.mav.mav.mission_item_int_encode(
+            target_system,
+            target_component,
+            2, # seq
+            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+            0, # current
+            0, # autocontinue
+            3, # p1
+            0, # p2
+            0, # p3
+            0, # p4
+            int(wp2_loc.lat * 1e7), # latitude
+            int(wp2_loc.lng * 1e7), # longitude
+            31.0000, # altitude
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
+        wp3 = copy.copy(wp2)
+        wp3.alt = 40
+        wp4 = copy.copy(wp2)
+        wp4.alt = 31
+
+        wp5_loc = self.mav.location()
+        wp5_offset_n = -20
+        wp5_offset_e = 30
+        self.location_offset_ne(wp5_loc, wp5_offset_n, wp5_offset_e)
+
+        wp5 = self.mav.mav.mission_item_int_encode(
+            target_system,
+            target_component,
+            5, # seq
+            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            mavutil.mavlink.MAV_CMD_NAV_SPLINE_WAYPOINT,
+            0, # current
+            0, # autocontinue
+            3, # p1
+            0, # p2
+            0, # p3
+            0, # p4
+            int(wp5_loc.lat * 1e7), # latitude
+            int(wp5_loc.lng * 1e7), # longitude
+            31.0000, # altitude
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
+        wp6 = copy.copy(wp5)
+        wp6.alt = 41
+        wp7 = copy.copy(wp5)
+        wp7.alt = 51
+
+        ret = copy.copy([
+            # slot 0 is home
+            self.mission_item_home(target_system=target_system, target_component=target_component),
+            # slot 1 is takeoff
+            self.mission_item_takeoff(target_system=target_system, target_component=target_component),
+            wp2,
+            wp3,
+            wp4,
+            # now three MORE spline waypoints right on top of one another somewhere else:
+            wp5,
+            wp6,
+            wp7,
+            self.mission_item_rtl(target_system=target_system, target_component=target_component),
+        ])
+        self.correct_wp_seq_numbers(ret)
+        return ret
+
+    def fly_mission_points(self, points):
+        '''takes a list of waypoints and flies them, expecting a disarm at end'''
+        self.check_mission_upload_download(points)
+        self.set_parameter("AUTO_OPTIONS", 3)
+        self.change_mode('AUTO')
+        self.set_rc(8, 1000)
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.progress("Raising rotor speed")
+        self.set_rc(8, 2000)
+        self.wait_waypoint(0, len(points)-1)
+        self.wait_disarmed()
+        self.set_rc(8, 1000)
+
+    def NastyMission(self):
+        '''constructs and runs missions designed to test scurves'''
+        self.fly_mission_points(self.scurve_nasty_mission())
+        # hopefully we don't need this step forever:
+        self.progress("Restting mission state machine by changing into LOITER")
+        self.change_mode('LOITER')
+        self.fly_mission_points(self.scurve_nasty_up_mission())
 
     def set_rc_default(self):
         super(AutoTestHelicopter, self).set_rc_default()
@@ -397,6 +703,7 @@ class AutoTestHelicopter(AutoTestCopter):
                 raise NotAchievedException("Airspeed mismatch (as1=%f as2=%f)" % (airspeed[0], airspeed[1]))
 
         # Copter's airspeed sensors are off by default
+        self.set_parameter("ARSPD_ENABLE", 1)
         self.set_parameter("ARSPD_TYPE", 2)     # Analog airspeed driver
         self.set_parameter("ARSPD_PIN", 1)      # Analog airspeed driver pin for SITL
         self.reboot_sitl()
@@ -427,9 +734,117 @@ class AutoTestHelicopter(AutoTestCopter):
 
         self.reboot_sitl()
 
+    def TurbineStart(self, timeout=200):
+        """Check Turbine Start Feature"""
+        RAMP_TIME = 4
+        # set option for Turbine Start
+        self.set_parameter("RC6_OPTION", 161)
+        self.set_parameter("H_RSC_RAMP_TIME", RAMP_TIME)
+        self.set_parameter("H_RSC_SETPOINT", 66)
+        self.set_parameter("DISARM_DELAY", 0)
+        self.set_rc(3, 1000)
+        self.set_rc(8, 1000)
+
+        # check that turbine start doesn't activate while disarmed
+        self.progress("Checking Turbine Start doesn't activate while disarmed")
+        self.set_rc(6, 2000)
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 2:
+            servo = self.mav.recv_match(type='SERVO_OUTPUT_RAW', blocking=True)
+            if servo.servo8_raw > 1050:
+                raise NotAchievedException("Turbine Start activated while disarmed")
+        self.set_rc(6, 1000)
+
+        # check that turbine start doesn't activate armed with interlock enabled
+        self.progress("Checking Turbine Start doesn't activate while armed with interlock enabled")
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.set_rc(8, 2000)
+        self.set_rc(6, 2000)
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 5:
+            servo = self.mav.recv_match(type='SERVO_OUTPUT_RAW', blocking=True)
+            if servo.servo8_raw > 1660:
+                raise NotAchievedException("Turbine Start activated with interlock enabled")
+
+        self.set_rc(8, 1000)
+        self.set_rc(6, 1000)
+        self.disarm_vehicle()
+
+        # check that turbine start activates as designed (armed with interlock disabled)
+        self.progress("Checking Turbine Start activates as designed (armed with interlock disabled)")
+        self.delay_sim_time(2)
+        self.arm_vehicle()
+
+        self.set_rc(6, 2000)
+        tstart = self.get_sim_time()
+        while True:
+            if self.get_sim_time() - tstart > 5:
+                raise AutoTestTimeoutException("Turbine Start did not activate")
+            servo = self.mav.recv_match(type='SERVO_OUTPUT_RAW', blocking=True)
+            if servo.servo8_raw > 1800:
+                break
+
+        self.wait_servo_channel_value(8, 1000, timeout=3)
+        self.set_rc(6, 1000)
+
+        # check that turbine start will not reactivate after interlock enabled
+        self.progress("Checking Turbine Start doesn't activate once interlock is enabled after start)")
+        self.set_rc(8, 2000)
+        self.set_rc(6, 2000)
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 5:
+            servo = self.mav.recv_match(type='SERVO_OUTPUT_RAW', blocking=True)
+            if servo.servo8_raw > 1660:
+                raise NotAchievedException("Turbine Start activated with interlock enabled")
+        self.set_rc(6, 1000)
+        self.set_rc(8, 1000)
+        self.disarm_vehicle()
+
+    def PIDNotches(self):
+        """Use dynamic harmonic notch to control motor noise."""
+        self.progress("Flying with PID notches")
+        self.context_push()
+
+        ex = None
+        try:
+            self.set_parameters({
+                "FILT1_TYPE": 1,
+                "FILT2_TYPE": 1,
+                "AHRS_EKF_TYPE": 10,
+                "INS_LOG_BAT_MASK": 3,
+                "INS_LOG_BAT_OPT": 0,
+                "INS_GYRO_FILTER": 100, # set the gyro filter high so we can observe behaviour
+                "LOG_BITMASK": 65535,
+                "LOG_DISARMED": 0,
+                "SIM_VIB_FREQ_X": 120,  # roll
+                "SIM_VIB_FREQ_Y": 120,  # pitch
+                "SIM_VIB_FREQ_Z": 180,  # yaw
+                "FILT1_NOTCH_FREQ": 120,
+                "FILT2_NOTCH_FREQ": 180,
+                "ATC_RAT_RLL_NEF": 1,
+                "ATC_RAT_PIT_NEF": 1,
+                "ATC_RAT_YAW_NEF": 2,
+                "SIM_GYR1_RND": 5,
+            })
+            self.reboot_sitl()
+
+            self.takeoff(10, mode="ALT_HOLD")
+
+            freq, hover_throttle, peakdb1 = self.hover_and_check_matched_frequency_with_fft(5, 20, 350, reverse=True)
+
+        except Exception as e:
+            self.print_exception_caught(e)
+            ex = e
+
+        self.context_pop()
+
+        if ex is not None:
+            raise ex
+
     def tests(self):
         '''return list of all tests'''
-        ret = AutoTest.tests(self)
+        ret = vehicle_test_suite.TestSuite.tests(self)
         ret.extend([
             self.AVCMission,
             self.RotorRunup,
@@ -437,8 +852,13 @@ class AutoTestHelicopter(AutoTestCopter):
             self.StabilizeTakeOff,
             self.SplineWaypoint,
             self.AutoRotation,
+            self.ManAutoRotation,
+            self.governortest,
             self.FlyEachFrame,
             self.AirspeedDrivers,
+            self.TurbineStart,
+            self.NastyMission,
+            self.PIDNotches,
         ])
         return ret
 

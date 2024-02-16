@@ -14,6 +14,9 @@
 */
 
 #include "AP_VideoTX.h"
+
+#if AP_VIDEOTX_ENABLED
+
 #include <AP_RCTelemetry/AP_CRSF_Telem.h>
 #include <GCS_MAVLink/GCS.h>
 
@@ -48,7 +51,7 @@ const AP_Param::GroupInfo AP_VideoTX::var_info[] = {
     // @DisplayName: Video Transmitter Band
     // @Description: Video Transmitter Band
     // @User: Standard
-    // @Values: 0:Band A,1:Band B,2:Band E,3:Airwave,4:RaceBand,5:Low RaceBand
+    // @Values: 0:Band A,1:Band B,2:Band E,3:Airwave,4:RaceBand,5:Low RaceBand,6:1G3 Band A,7:1G3 Band B
     AP_GROUPINFO("BAND",  4, AP_VideoTX, _band, 0),
 
     // @Param: FREQ
@@ -56,7 +59,7 @@ const AP_Param::GroupInfo AP_VideoTX::var_info[] = {
     // @Description: Video Transmitter Frequency. The frequency is derived from the setting of BAND and CHANNEL
     // @User: Standard
     // @ReadOnly: True
-    // @Range: 5000 6000
+    // @Range: 1000 6000
     AP_GROUPINFO("FREQ",  5, AP_VideoTX, _frequency_mhz, 0),
 
     // @Param: OPTIONS
@@ -93,7 +96,9 @@ const uint16_t AP_VideoTX::VIDEO_CHANNELS[AP_VideoTX::MAX_BANDS][VTX_MAX_CHANNEL
     { 5705, 5685, 5665, 5645, 5885, 5905, 5925, 5945}, /* Band E */
     { 5740, 5760, 5780, 5800, 5820, 5840, 5860, 5880}, /* Airwave */
     { 5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917}, /* Race */
-    { 5621, 5584, 5547, 5510, 5473, 5436, 5399, 5362}  /* LO Race */
+    { 5621, 5584, 5547, 5510, 5473, 5436, 5399, 5362}, /* LO Race */
+    { 1080, 1120, 1160, 1200, 1240, 1280, 1320, 1360}, /* Band 1G3_A */
+    { 1080, 1120, 1160, 1200, 1258, 1280, 1320, 1360}  /* Band 1G3_B */
 };
 
 // mapping of power level to milliwatt to dbm
@@ -332,6 +337,10 @@ void AP_VideoTX::set_freq_is_current()
 // periodic update
 void AP_VideoTX::update(void)
 {
+    if (!_enabled) {
+        return;
+    }
+
 #if HAL_CRSF_TELEM_ENABLED
     AP_CRSF_Telem* crsf = AP::crsf_telem();
 
@@ -500,13 +509,13 @@ void AP_VideoTX::announce_vtx_settings() const
 // 6-pos range is in the middle of the available range
 void AP_VideoTX::change_power(int8_t position)
 {
-    if (position < 0 || position > 5) {
+    if (!_enabled || position < 0 || position > 5) {
         return;
     }
     // first find out how many possible levels there are
     uint8_t num_active_levels = 0;
     for (uint8_t i = 0; i < VTX_MAX_POWER_LEVELS; i++) {
-        if (_power_levels[i].active != PowerActive::Inactive) {
+        if (_power_levels[i].active != PowerActive::Inactive && _power_levels[i].mw <= _max_power_mw) {
             num_active_levels++;
         }
     }
@@ -526,7 +535,9 @@ void AP_VideoTX::change_power(int8_t position)
     }
 
     if (power == 0) {
-        set_configured_options(get_configured_options() | uint8_t(VideoOptions::VTX_PITMODE));
+        if (!hal.util->get_soft_armed()) {    // don't allow pitmode to be entered if already armed
+            set_configured_options(get_configured_options() | uint8_t(VideoOptions::VTX_PITMODE));
+        }
     } else {
         if (has_option(VideoOptions::VTX_PITMODE)) {
             set_configured_options(get_configured_options() & ~uint8_t(VideoOptions::VTX_PITMODE));
@@ -540,3 +551,5 @@ namespace AP {
         return *AP_VideoTX::get_singleton();
     }
 };
+
+#endif

@@ -22,6 +22,8 @@
 
 #if HAL_WITH_MSP_DISPLAYPORT
 
+#include <GCS_MAVLink/GCS.h>
+
 static const struct AP_Param::defaults_table_struct defaults_table[] = {
     /*
     { "PARAM_NAME",       value_float }
@@ -37,12 +39,12 @@ bool AP_OSD_MSP_DisplayPort::init(void)
     // check if we have a DisplayPort backend to use
     const AP_MSP *msp = AP::msp();
     if (msp == nullptr) {
-        gcs().send_text(MAV_SEVERITY_WARNING,"MSP backend not available");
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING,"MSP backend not available");
         return false;
     }
     _displayport = msp->find_protocol(AP_SerialManager::SerialProtocol_MSP_DisplayPort);
     if (_displayport == nullptr) {
-        gcs().send_text(MAV_SEVERITY_WARNING,"MSP DisplayPort uart not available");
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING,"MSP DisplayPort uart not available");
         return false;
     }
     // re-init port here for use in this thread
@@ -131,4 +133,12 @@ AP_OSD_Backend *AP_OSD_MSP_DisplayPort::probe(AP_OSD &osd)
     }
     return backend;
 }
+ 
+// return a correction factor used to display angles correctly
+float AP_OSD_MSP_DisplayPort::get_aspect_ratio_correction() const
+{
+    return 12.0/18.0;
+}
+
+
 #endif

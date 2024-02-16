@@ -30,12 +30,12 @@ void GCS_Sub::update_vehicle_sensor_status_flags()
         MAV_SYS_STATUS_SENSOR_XY_POSITION_CONTROL;
 
     switch (sub.control_mode) {
-    case ALT_HOLD:
-    case AUTO:
-    case GUIDED:
-    case CIRCLE:
-    case SURFACE:
-    case POSHOLD:
+    case Mode::Number::ALT_HOLD:
+    case Mode::Number::AUTO:
+    case Mode::Number::GUIDED:
+    case Mode::Number::CIRCLE:
+    case Mode::Number::SURFACE:
+    case Mode::Number::POSHOLD:
         control_sensors_enabled |= MAV_SYS_STATUS_SENSOR_Z_ALTITUDE_CONTROL;
         control_sensors_health |= MAV_SYS_STATUS_SENSOR_Z_ALTITUDE_CONTROL;
         control_sensors_enabled |= MAV_SYS_STATUS_SENSOR_XY_POSITION_CONTROL;
@@ -55,17 +55,6 @@ void GCS_Sub::update_vehicle_sensor_status_flags()
     if (sub.sensor_health.depth) {
         control_sensors_health |= MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE;
     }
-
-#if AP_OPTICALFLOW_ENABLED
-    const AP_OpticalFlow *optflow = AP::opticalflow();
-    if (optflow && optflow->enabled()) {
-        control_sensors_present |= MAV_SYS_STATUS_SENSOR_OPTICAL_FLOW;
-        control_sensors_enabled |= MAV_SYS_STATUS_SENSOR_OPTICAL_FLOW;
-    }
-    if (optflow && optflow->healthy()) {
-        control_sensors_health |= MAV_SYS_STATUS_SENSOR_OPTICAL_FLOW;
-    }
-#endif
 
 #if AP_TERRAIN_AVAILABLE
     switch (sub.terrain.status()) {

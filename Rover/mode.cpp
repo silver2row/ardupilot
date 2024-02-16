@@ -317,7 +317,9 @@ void Mode::calc_throttle(float target_speed, bool avoidance_enabled)
             bool stopped;
             throttle_out = 100.0f * attitude_control.get_throttle_out_stop(g2.motors.limit.throttle_lower, g2.motors.limit.throttle_upper, g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, stopped);
         } else {
-            throttle_out = 100.0f * attitude_control.get_throttle_out_speed(target_speed, g2.motors.limit.throttle_lower, g2.motors.limit.throttle_upper, g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt);
+            bool motor_lim_low = g2.motors.limit.throttle_lower || attitude_control.pitch_limited();
+            bool motor_lim_high = g2.motors.limit.throttle_upper || attitude_control.pitch_limited();
+            throttle_out = 100.0f * attitude_control.get_throttle_out_speed(target_speed, motor_lim_low, motor_lim_high, g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt);
         }
 
         // if vehicle is balance bot, calculate actual throttle required for balancing
@@ -529,11 +531,16 @@ Mode *Rover::mode_from_mode_num(const enum Mode::Number num)
     case Mode::Number::LOITER:
         ret = &mode_loiter;
         break;
+#if MODE_FOLLOW_ENABLED == ENABLED
     case Mode::Number::FOLLOW:
         ret = &mode_follow;
         break;
+#endif
     case Mode::Number::SIMPLE:
         ret = &mode_simple;
+        break;
+    case Mode::Number::CIRCLE:
+        ret = &g2.mode_circle;
         break;
     case Mode::Number::AUTO:
         ret = &mode_auto;

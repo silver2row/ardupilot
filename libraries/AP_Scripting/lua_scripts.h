@@ -14,40 +14,22 @@
  */
 #pragma once
 
+#include "AP_Scripting_config.h"
+
+#if AP_SCRIPTING_ENABLED
+
 #include <AP_Common/AP_Common.h>
 #include <AP_Param/AP_Param.h>
 #include <setjmp.h>
 
 #include <AP_Filesystem/posix_compat.h>
 #include <AP_Scripting/AP_Scripting.h>
-#include <GCS_MAVLink/GCS.h>
+#include <GCS_MAVLink/GCS_MAVLink.h>
 #include <AP_HAL/Semaphores.h>
+#include <AP_Common/MultiHeap.h>
+#include "lua_common_defs.h"
 
 #include "lua/src/lua.hpp"
-
-#ifndef REPL_DIRECTORY
-  #if HAL_OS_FATFS_IO
-    #define REPL_DIRECTORY "/APM/repl"
-  #else
-    #define REPL_DIRECTORY "./repl"
-  #endif //HAL_OS_FATFS_IO
-#endif // REPL_DIRECTORY
-
-#ifndef SCRIPTING_DIRECTORY
-  #if HAL_OS_FATFS_IO
-    #define SCRIPTING_DIRECTORY "/APM/scripts"
-  #else
-    #define SCRIPTING_DIRECTORY "./scripts"
-  #endif //HAL_OS_FATFS_IO
-#endif // SCRIPTING_DIRECTORY
-
-#ifndef REPL_IN
-  #define REPL_IN REPL_DIRECTORY "/in"
-#endif // REPL_IN
-
-#ifndef REPL_OUT
-  #define REPL_OUT REPL_DIRECTORY "/out"
-#endif // REPL_OUT
 
 class lua_scripts
 {
@@ -59,7 +41,7 @@ public:
     CLASS_NO_COPY(lua_scripts);
 
     // return true if initialisation failed
-    bool heap_allocated() const { return _heap != nullptr; }
+    bool heap_allocated() const { return _heap.available(); }
 
     // run scripts, does not return unless an error occured
     void run(void);
@@ -72,17 +54,18 @@ public:
         SUPPRESS_SCRIPT_LOG = 1U << 2,
         LOG_RUNTIME = 1U << 3,
         DISABLE_PRE_ARM = 1U << 4,
+        SAVE_CHECKSUM = 1U << 5,
     };
 
 private:
 
     void create_sandbox(lua_State *L);
-
     void repl_cleanup(void);
 
     typedef struct script_info {
        int lua_ref;          // reference to the loaded script object
        uint64_t next_run_ms; // time (in milliseconds) the script should next be run at
+       uint32_t crc;         // crc32 checksum
        char *name;           // filename for the script // FIXME: This information should be available from Lua
        script_info *next;
     } script_info;
@@ -131,7 +114,10 @@ private:
 
     static void *alloc(void *ud, void *ptr, size_t osize, size_t nsize);
 
-    static void *_heap;
+    static MultiHeap _heap;
+
+    // helper for print and log of runtime stats
+    void update_stats(const char *name, uint32_t run_time, int total_mem, int run_mem);
 
     // must be static for use in atpanic
     static void print_error(MAV_SEVERITY severity);
@@ -139,6 +125,12 @@ private:
     static HAL_Semaphore error_msg_buf_sem;
     static uint8_t print_error_count;
     static uint32_t last_print_ms;
+    int current_ref;
+
+    // XOR of crc32 of running scripts
+    static uint32_t loaded_checksum;
+    static uint32_t running_checksum;
+    static HAL_Semaphore crc_sem;
 
 public:
     // must be static for use in atpanic, public to allow bindings to issue none fatal warnings
@@ -150,4 +142,10 @@ public:
     // get semaphore for above error buffer
     static AP_HAL::Semaphore* get_last_error_semaphore() { return &error_msg_buf_sem; }
 
+    // Return the file checksums of running and loaded scripts
+    static uint32_t get_loaded_checksum();
+    static uint32_t get_running_checksum();
+
 };
+
+#endif  // AP_SCRIPTING_ENABLED

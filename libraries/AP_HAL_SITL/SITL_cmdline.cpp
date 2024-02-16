@@ -34,14 +34,20 @@
 #include <SITL/SIM_AirSim.h>
 #include <SITL/SIM_Scrimmage.h>
 #include <SITL/SIM_Webots.h>
+#include <SITL/SIM_Webots_Python.h>
 #include <SITL/SIM_JSON.h>
 #include <SITL/SIM_Blimp.h>
 #include <AP_Filesystem/AP_Filesystem.h>
+
+#include <AP_Vehicle/AP_Vehicle_Type.h>
 
 #include <signal.h>
 #include <stdio.h>
 #include <time.h>
 #include <sys/time.h>
+
+#define FORCE_VERSION_H_INCLUDE
+#include "ap_version.h"
 
 extern HAL_SITL& hal;
 
@@ -82,20 +88,20 @@ void SITL_State::_usage(void)
            "\t--model|-M MODEL         set simulation model\n"
            "\t--config string          set additional simulation config string\n"
            "\t--fg|-F ADDRESS          set Flight Gear view address, defaults to 127.0.0.1\n"
-           "\t--disable-fgview         disable Flight Gear view\n"
+           "\t--enable-fgview          enable Flight Gear view\n"
            "\t--gimbal                 enable simulated MAVLink gimbal\n"
            "\t--autotest-dir DIR       set directory for additional files\n"
            "\t--defaults path          set path to defaults file\n"
-           "\t--uartA device           set device string for UARTA\n"
-           "\t--uartB device           set device string for UARTB\n"
-           "\t--uartC device           set device string for UARTC\n"
-           "\t--uartD device           set device string for UARTD\n"
-           "\t--uartE device           set device string for UARTE\n"
-           "\t--uartF device           set device string for UARTF\n"
-           "\t--uartG device           set device string for UARTG\n"
-           "\t--uartH device           set device string for UARTH\n"
-           "\t--uartI device           set device string for UARTI\n"
-           "\t--uartJ device           set device string for UARTJ\n"
+           "\t--uartA device           (deprecated) set device string for SERIAL0\n"
+           "\t--uartC device           (deprecated) set device string for SERIAL1\n" // ordering captures the historical use of uartB as SERIAL3
+           "\t--uartD device           (deprecated) set device string for SERIAL2\n"
+           "\t--uartB device           (deprecated) set device string for SERIAL3\n"
+           "\t--uartE device           (deprecated) set device string for SERIAL4\n"
+           "\t--uartF device           (deprecated) set device string for SERIAL5\n"
+           "\t--uartG device           (deprecated) set device string for SERIAL6\n"
+           "\t--uartH device           (deprecated) set device string for SERIAL7\n"
+           "\t--uartI device           (deprecated) set device string for SERIAL8\n"
+           "\t--uartJ device           (deprecated) set device string for SERIAL9\n"
            "\t--serial0 device         set device string for SERIAL0\n"
            "\t--serial1 device         set device string for SERIAL1\n"
            "\t--serial2 device         set device string for SERIAL2\n"
@@ -171,6 +177,7 @@ static const struct {
     { "morse",              Morse::create },
     { "airsim",             AirSim::create},
     { "scrimmage",          Scrimmage::create },
+    { "webots-python",      WebotsPython::create },
     { "webots",             Webots::create },
     { "JSON",               JSON::create },
     { "blimp",              Blimp::create },
@@ -199,12 +206,14 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
 {
     int opt;
     float speedup = 1.0f;
+    float sim_rate_hz = 0;
     _instance = 0;
     _synthetic_clock_mode = false;
     // default to CMAC
     const char *home_str = nullptr;
     const char *model_str = nullptr;
-    _use_fg_view = true;
+    const char *vehicle_str = SKETCH;
+    _use_fg_view = false;
     char *autotest_dir = nullptr;
     _fg_address = "127.0.0.1";
     const char* config = "";
@@ -237,7 +246,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         CMDLINE_FGVIEW,
         CMDLINE_AUTOTESTDIR,
         CMDLINE_DEFAULTS,
-        CMDLINE_UARTA,
+        CMDLINE_UARTA,  // must be in A-J order and numbered consecutively
         CMDLINE_UARTB,
         CMDLINE_UARTC,
         CMDLINE_UARTD,
@@ -247,7 +256,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         CMDLINE_UARTH,
         CMDLINE_UARTI,
         CMDLINE_UARTJ,
-        CMDLINE_SERIAL0,
+        CMDLINE_SERIAL0, // must be in 0-9 order and numbered consecutively
         CMDLINE_SERIAL1,
         CMDLINE_SERIAL2,
         CMDLINE_SERIAL3,
@@ -293,7 +302,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         {"config",          true,   0, 'c'},
         {"fg",              true,   0, 'F'},
         {"gimbal",          false,  0, CMDLINE_GIMBAL},
-        {"disable-fgview",  false,  0, CMDLINE_FGVIEW},
+        {"enable-fgview",   false,  0, CMDLINE_FGVIEW},
         {"autotest-dir",    true,   0, CMDLINE_AUTOTESTDIR},
         {"defaults",        true,   0, CMDLINE_DEFAULTS},
         {"uartA",           true,   0, CMDLINE_UARTA},
@@ -335,6 +344,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
 #if STORAGE_USE_FRAM
         {"set-storage-fram-enabled", true,   0, CMDLINE_SET_STORAGE_FRAM_ENABLED},
 #endif
+        {"vehicle",           true,   0, 'v'},
         {0, false, 0, 0}
     };
 
@@ -349,7 +359,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
     bool storage_fram_enabled = false;
     bool erase_all_storage = false;
 
-    if (asprintf(&autotest_dir, SKETCHBOOK "/Tools/autotest") <= 0) {
+    if (asprintf(&autotest_dir, AP_BUILD_ROOT "/Tools/autotest") <= 0) {
         AP_HAL::panic("out of memory");
     }
     _set_signal_handlers();
@@ -359,7 +369,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
 
     bool wiping_storage = false;
 
-    GetOptLong gopt(argc, argv, "hwus:r:CI:P:SO:M:F:c:",
+    GetOptLong gopt(argc, argv, "hwus:r:CI:P:SO:M:F:c:v:",
                     options);
     while (!is_replay && (opt = gopt.getoption()) != -1) {
         switch (opt) {
@@ -374,6 +384,12 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
             temp_cmdline_param = {"SIM_SPEEDUP", speedup};
             cmdline_param.push_back(temp_cmdline_param);
             printf("Setting SIM_SPEEDUP=%f\n", speedup);
+            break;
+        case 'r':
+            sim_rate_hz = strtof(gopt.optarg, nullptr);
+            temp_cmdline_param = {"SIM_RATE_HZ", sim_rate_hz};
+            cmdline_param.push_back(temp_cmdline_param);
+            printf("Setting SIM_RATE_HZ=%f\n", sim_rate_hz);
             break;
         case 'C':
             HALSITL::UARTDriver::_console = true;
@@ -418,11 +434,14 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         case 'F':
             _fg_address = gopt.optarg;
             break;
+        case 'v':
+            vehicle_str = gopt.optarg;
+            break;
         case CMDLINE_GIMBAL:
             enable_gimbal = true;
             break;
         case CMDLINE_FGVIEW:
-            _use_fg_view = false;
+            _use_fg_view = true;
             break;
         case CMDLINE_AUTOTESTDIR:
             autotest_dir = strdup(gopt.optarg);
@@ -439,9 +458,18 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         case CMDLINE_UARTG:
         case CMDLINE_UARTH:
         case CMDLINE_UARTI:
-        case CMDLINE_UARTJ:
-            _uart_path[opt - CMDLINE_UARTA] = gopt.optarg;
+        case CMDLINE_UARTJ: {
+            int uart_idx = opt - CMDLINE_UARTA;
+            // ordering captures the historical use of uartB as SERIAL3
+            static const uint8_t mapping[] = { 0, 3, 1, 2, 4, 5, 6, 7, 8, 9 };
+            int serial_idx = mapping[uart_idx];
+            char uart_letter = (char)(uart_idx)+'A';
+            printf("WARNING: deprecated option --uart%c will be removed in a "
+                "future release. Use --serial%d instead.\n",
+                uart_letter, serial_idx);
+            _serial_path[serial_idx] = gopt.optarg;
             break;
+        }
         case CMDLINE_SERIAL0:
         case CMDLINE_SERIAL1:
         case CMDLINE_SERIAL2:
@@ -451,11 +479,9 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         case CMDLINE_SERIAL6:
         case CMDLINE_SERIAL7:
         case CMDLINE_SERIAL8:
-        case CMDLINE_SERIAL9: {
-            static const uint8_t mapping[] = { 0, 2, 3, 1, 4, 5, 6, 7, 8, 9 };
-            _uart_path[mapping[opt - CMDLINE_SERIAL0]] = gopt.optarg;
+        case CMDLINE_SERIAL9:
+            _serial_path[opt - CMDLINE_SERIAL0] = gopt.optarg;
             break;
-        }
         case CMDLINE_RTSCTS:
             _use_rtscts = true;
             break;
@@ -588,20 +614,20 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         hal.set_wipe_storage(wiping_storage);
     }
 
-    fprintf(stdout, "Starting sketch '%s'\n", SKETCH);
+    fprintf(stdout, "Starting sketch '%s'\n", vehicle_str);
 
-    if (strcmp(SKETCH, "ArduCopter") == 0) {
+    if (strcmp(vehicle_str, "ArduCopter") == 0) {
         _vehicle = ArduCopter;
-    } else if (strcmp(SKETCH, "Rover") == 0) {
+    } else if (strcmp(vehicle_str, "Rover") == 0) {
         _vehicle = Rover;
         // set right default throttle for rover (allowing for reverse)
         pwm_input[2] = 1500;
-    } else if (strcmp(SKETCH, "ArduSub") == 0) {
+    } else if (strcmp(vehicle_str, "ArduSub") == 0) {
         _vehicle = ArduSub;
         for(uint8_t i = 0; i < 8; i++) {
             pwm_input[i] = 1500;
         }
-    } else if (strcmp(SKETCH, "Blimp") == 0) {
+    } else if (strcmp(vehicle_str, "Blimp") == 0) {
         _vehicle = Blimp;
         for(uint8_t i = 0; i < 8; i++) {
             pwm_input[i] = 1500;

@@ -2,10 +2,6 @@
 
 #include "AP_Baro_Backend.h"
 
-#ifndef AP_BARO_DPS280_ENABLED
-#define AP_BARO_DPS280_ENABLED AP_BARO_BACKEND_DEFAULT_ENABLED
-#endif
-
 #if AP_BARO_DPS280_ENABLED
 
 #include <AP_HAL/AP_HAL.h>
@@ -33,7 +29,7 @@ public:
     static AP_Baro_Backend *probe(AP_Baro &baro, AP_HAL::OwnPtr<AP_HAL::Device> dev, bool _is_dps310=false);
 
 protected:
-    bool init(void);
+    bool init(bool _is_dps310);
     bool read_calibration(void);
     void timer(void);
     void calculate_PT(int32_t UT, int32_t UP, float &pressure, float &temperature);

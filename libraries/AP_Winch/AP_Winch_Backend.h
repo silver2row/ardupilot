@@ -17,6 +17,8 @@
 
 #include <AP_Winch/AP_Winch.h>
 
+#if AP_WINCH_ENABLED
+
 class AP_Winch_Backend {
 public:
     AP_Winch_Backend(struct AP_Winch::Backend_Config &_config) :
@@ -40,6 +42,11 @@ public:
     // write log
     virtual void write_log() = 0;
 
+    // helper to check if option enabled
+    bool option_enabled(AP_Winch::Options option) const {
+        return (config.options & uint16_t(option)) != 0;
+    }
+
 protected:
 
     // calculate the pilot desired rate (+ve deploys line, -ve retracts line, 0 stops) from rc input
@@ -58,3 +65,5 @@ protected:
     int16_t previous_radio_in = -1; // previous RC input from pilot, used to ignore small changes
     float previous_rate;            // previous rate used for acceleration limiting
 };
+
+#endif  // AP_WINCH_ENABLED

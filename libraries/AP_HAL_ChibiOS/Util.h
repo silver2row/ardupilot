@@ -20,9 +20,6 @@
 #include "AP_HAL_ChibiOS_Namespace.h"
 #include "AP_HAL_ChibiOS.h"
 #include <ch.h>
-#if !defined(HAL_BOOTLOADER_BUILD)
-#include <GCS_MAVLink/GCS.h>
-#endif
 
 class ExpandingString;
 
@@ -30,7 +27,7 @@ class ExpandingString;
 // on F7 and H7 we will try to save key persistent parameters at the
 // end of the bootloader sector. This enables temperature calibration
 // data to be saved persistently in the factory
-#define HAL_ENABLE_SAVE_PERSISTENT_PARAMS !defined(HAL_BOOTLOADER_BUILD) && !defined(HAL_BUILD_AP_PERIPH) && (defined(STM32F7) || defined(STM32H7))
+#define HAL_ENABLE_SAVE_PERSISTENT_PARAMS (defined(STM32F7) || defined(STM32H7))
 #endif
 
 class ChibiOS::Util : public AP_HAL::Util {
@@ -49,7 +46,7 @@ public:
 #ifdef ENABLE_HEAP
     // heap functions, note that a heap once alloc'd cannot be dealloc'd
     virtual void *allocate_heap_memory(size_t size) override;
-    virtual void *heap_realloc(void *heap, void *ptr, size_t new_size) override;
+    virtual void *heap_realloc(void *heap, void *ptr, size_t old_size, size_t new_size) override;
     virtual void *std_realloc(void *ptr, size_t new_size) override;
 #endif // ENABLE_HEAP
 
@@ -92,6 +89,7 @@ public:
 #if HAL_ENABLE_SAVE_PERSISTENT_PARAMS
     // save/load key persistent parameters in bootloader sector
     bool load_persistent_params(ExpandingString &str) const override;
+    bool get_persistent_param_by_name(const char *name, char* value, size_t& len) const override;
 #endif
 #if HAL_UART_STATS_ENABLED
     // request information on uart I/O
@@ -129,7 +127,7 @@ private:
       get system clock in UTC microseconds
      */
     uint64_t get_hw_rtc() const override;
-#if !defined(HAL_NO_FLASH_SUPPORT) && !defined(HAL_NO_ROMFS_SUPPORT)
+#if AP_BOOTLOADER_FLASHING_ENABLED
     FlashBootloader flash_bootloader() override;
 #endif
 

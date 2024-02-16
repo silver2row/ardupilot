@@ -18,6 +18,7 @@
 #include <AC_Fence/AC_Fence.h>
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Logger/AP_Logger.h>
+#include <AP_Vehicle/AP_Vehicle_Type.h>
 
 // parameter defaults
 const float OA_BENDYRULER_LOOKAHEAD_DEFAULT = 15.0f;
@@ -77,8 +78,8 @@ AP_OABendyRuler::AP_OABendyRuler()
     _bearing_prev = FLT_MAX;
 }
 
-// run background task to find best path and update avoidance_results
-// returns true and updates origin_new and destination_new if a best path has been found
+// run background task to find best path
+// returns true and updates origin_new and destination_new if a best path has been found.  returns false if OA is not required
 // bendy_type is set to the type of BendyRuler used
 bool AP_OABendyRuler::update(const Location& current_loc, const Location& destination, const Vector2f &ground_speed_vec, Location &origin_new, Location &destination_new, OABendyType &bendy_type, bool proximity_only)
 {

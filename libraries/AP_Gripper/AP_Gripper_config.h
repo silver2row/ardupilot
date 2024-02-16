@@ -1,9 +1,9 @@
 #pragma once
 
-#include <AP_BoardConfig/AP_BoardConfig.h>
+#include <AP_HAL/AP_HAL_Boards.h>
 
 #ifndef AP_GRIPPER_ENABLED
-#define AP_GRIPPER_ENABLED !HAL_MINIMIZE_FEATURES
+#define AP_GRIPPER_ENABLED 1
 #endif
 
 #ifndef AP_GRIPPER_BACKEND_DEFAULT_ENABLED

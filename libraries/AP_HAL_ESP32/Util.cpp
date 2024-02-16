@@ -33,6 +33,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
+#include <AP_Common/ExpandingString.h>
 
 
 extern const AP_HAL::HAL& hal;
@@ -107,7 +108,7 @@ void *Util::allocate_heap_memory(size_t size)
     return heap;
 }
 
-void *Util::heap_realloc(void *heap, void *ptr, size_t new_size)
+void *Util::heap_realloc(void *heap, void *ptr, size_t old_size, size_t new_size)
 {
     if (heap == nullptr) {
         return nullptr;
@@ -217,7 +218,7 @@ Util::FlashBootloader Util::flash_bootloader()
 bool Util::get_system_id(char buf[50])
 {
     //uint8_t serialid[12];
-    char board_name[14] = "esp32-buzz   ";
+    char board_name[] = HAL_ESP32_BOARD_NAME" ";
 
     uint8_t base_mac_addr[6] = {0};
     esp_err_t ret = esp_efuse_mac_get_custom(base_mac_addr);
@@ -230,7 +231,7 @@ bool Util::get_system_id(char buf[50])
              base_mac_addr[0], base_mac_addr[1], base_mac_addr[2], base_mac_addr[3], base_mac_addr[4], base_mac_addr[5]);
 
     // null terminate both
-    board_name[13] = 0;
+    //board_name[13] = 0;
     board_mac[19] = 0;
 
     // tack strings togehter
@@ -268,28 +269,17 @@ bool Util::was_watchdog_reset() const
            || reason == ESP_RST_WDT;
 }
 
-#if CH_DBG_ENABLE_STACK_CHECK == TRUE
 /*
   display stack usage as text buffer for @SYS/threads.txt
  */
-size_t Util::thread_info(char *buf, size_t bufsize)
+void Util::thread_info(ExpandingString &str)
 {
-    thread_t *tp;
-    size_t total = 0;
-
     // a header to allow for machine parsers to determine format
-    int n = snprintf(buf, bufsize, "ThreadsV1\n");
-    if (n <= 0) {
-        return 0;
-    }
+    str.printf("ThreadsV1\n");
 
     //    char buffer[1024];
     //    vTaskGetRunTimeStats(buffer);
     //    snprintf(buf, bufsize,"\n\n%s\n", buffer);
-
-    // total = ..
-
-    return total;
 }
-#endif // CH_DBG_ENABLE_STACK_CHECK == TRUE
+
 

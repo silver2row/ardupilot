@@ -15,6 +15,10 @@
 
 #pragma once
 
+#include "AP_Winch_config.h"
+
+#if AP_WINCH_ENABLED
+
 #include <AP_Common/AP_Common.h>
 #include <AP_Math/AP_Math.h>
 #include <AP_Param/AP_Param.h>
@@ -78,6 +82,13 @@ private:
         DAIWA = 2
     };
 
+    // enum for OPTIONS parameter
+    enum class Options : int16_t {
+        SpinFreelyOnStartup = (1U << 0),    // winch allows line to be manually pulled out soon after startup
+        VerboseOutput = (1U << 1),          // verbose output of winch state sent to GCS
+        RetryIfStuck = (1U << 2),           // retries to raise or lower if winch stops
+    };
+
     // winch states
     enum class ControlMode : uint8_t {
         RELAXED = 0,    // winch is realxed
@@ -90,6 +101,7 @@ private:
         AP_Int8     type;               // winch type
         AP_Float    rate_max;           // deploy or retract rate maximum (in m/s).
         AP_Float    pos_p;              // position error P gain
+        AP_Int16    options;            // options bitmask
         ControlMode control_mode;       // state of winch control (using target position or target rate)
         float       length_desired;     // target desired length (in meters)
         float       rate_desired;       // target deploy rate (in m/s, +ve = deploying, -ve = retracting)
@@ -103,3 +115,5 @@ private:
 namespace AP {
     AP_Winch *winch();
 };
+
+#endif  // AP_WINCH_ENABLED

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 import re
@@ -70,6 +70,7 @@ class BoardList(object):
             Board("bbbmini"),
             Board("blue"),
             Board("pxfmini"),
+            Board("canzero"),
             Board("SITL_x86_64_linux_gnu"),
             Board("SITL_arm_linux_gnueabihf"),
         ]
@@ -136,7 +137,6 @@ class BoardList(object):
 
             # bdshot
             "fmuv3-bdshot",
-            "OMNIBUSF7V2-bdshot",
 
             # renamed to KakuteH7Mini-Nand
             "KakuteH7Miniv2",
@@ -151,6 +151,7 @@ class BoardList(object):
             "MazzyStarDrone",
             "omnibusf4pro-one",
             "skyviper-f412-rev1",
+            "SkystarsH7HD",
             "*-ODID",
             "*-ODID-heli",
         ]

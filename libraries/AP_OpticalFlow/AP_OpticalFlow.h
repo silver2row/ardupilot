@@ -14,19 +14,7 @@
  */
 #pragma once
 
-#include <AP_HAL/AP_HAL_Boards.h>
-
-#ifndef AP_OPTICALFLOW_ENABLED
-#define AP_OPTICALFLOW_ENABLED 1
-#endif
-
-#ifndef HAL_MSP_OPTICALFLOW_ENABLED
-#define HAL_MSP_OPTICALFLOW_ENABLED (AP_OPTICALFLOW_ENABLED && (HAL_MSP_ENABLED && !HAL_MINIMIZE_FEATURES))
-#endif
-
-#ifndef AP_OPTICALFLOW_SITL_ENABLED
-#define AP_OPTICALFLOW_SITL_ENABLED AP_SIM_ENABLED
-#endif
+#include "AP_OpticalFlow_config.h"
 
 #if AP_OPTICALFLOW_ENABLED
 
@@ -100,6 +88,9 @@ public:
     // last_update() - returns system time of last sensor update
     uint32_t last_update() const { return _last_update_ms; }
 
+    // get_height_override() - returns the user-specified height of sensor above ground
+    float get_height_override() const { return _height_override; }
+
     struct OpticalFlow_state {
         uint8_t  surface_quality;   // image quality (below TBD you can't trust the dx,dy values returned)
         Vector2f flowRate;          // optical flow angular rate in rad/sec measured about the X and Y body axis. A RH rotation about a sensor axis produces a positive rate.
@@ -135,6 +126,7 @@ private:
     AP_Int16 _yawAngle_cd;          // yaw angle of sensor X axis with respect to vehicle X axis - centi degrees
     AP_Vector3f _pos_offset;        // position offset of the flow sensor in the body frame
     AP_Int8  _address;              // address on the bus (allows selecting between 8 possible I2C addresses for px4flow)
+    AP_Float  _height_override;              // height of the sensor above the ground. Only used in rover
 
     // method called by backend to update frontend state:
     void update_state(const OpticalFlow_state &state);
@@ -147,9 +139,10 @@ private:
     void Log_Write_Optflow();
     uint32_t _log_bit = -1;     // bitmask bit which indicates if we should log.  -1 means we always log
 
+#if AP_OPTICALFLOW_CALIBRATOR_ENABLED
     // calibrator
     AP_OpticalFlow_Calibrator *_calibrator;
-
+#endif
 };
 
 namespace AP {

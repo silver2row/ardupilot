@@ -18,9 +18,12 @@
  April 2017
  */
 
+#include "AP_Beacon_Marvelmind.h"
+
+#if AP_BEACON_MARVELMIND_ENABLED
+
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Math/crc.h>
-#include "AP_Beacon_Marvelmind.h"
 
 #define AP_BEACON_MARVELMIND_POSITION_DATAGRAM_ID 0x0001
 #define AP_BEACON_MARVELMIND_POSITIONS_DATAGRAM_ID 0x0002
@@ -200,15 +203,13 @@ void AP_Beacon_Marvelmind::update(void)
         return;
     }
     // read any available characters
-    int32_t num_bytes_read = uart->available();
-    uint8_t received_char = 0;
-    if (num_bytes_read < 0) {
-        return;
-    }
+    uint16_t num_bytes_read = MIN(uart->available(), 16384U);
     while (num_bytes_read-- > 0) {
         bool good_byte = false;
-        received_char = uart->read();
-        input_buffer[num_bytes_in_block_received] = received_char;
+        if (!uart->read(input_buffer[num_bytes_in_block_received])) {
+            break;
+        }
+        const uint8_t received_char = input_buffer[num_bytes_in_block_received];
         switch (parse_state) {
         case RECV_HDR:
             switch (num_bytes_in_block_received) {
@@ -386,3 +387,5 @@ void AP_Beacon_Marvelmind::order_stationary_beacons()
         } while(swapped);
     }
 }
+
+#endif  // AP_BEACON_MARVELMIND_ENABLED

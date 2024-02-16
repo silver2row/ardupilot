@@ -19,8 +19,6 @@
 
 #if AP_GRIPPER_SERVO_ENABLED
 
-#include <SRV_Channel/SRV_Channel.h>
-
 #define SERVO_ACTUATION_TIME    500         // Time for servo to move to target position during grab or release in milliseconds
 
 class AP_Gripper_Servo : public AP_Gripper_Backend {
@@ -46,7 +44,7 @@ public:
 
 protected:
 
-    // type-specific intiailisations:
+    // type-specific initializations:
     void init_gripper() override;
 
     // type-specific periodic updates:
