@@ -8,7 +8,6 @@
 #include <AP_AIS/AP_AIS.h>
 #include <AP_Beacon/AP_Beacon.h>
 #include <AP_Follow/AP_Follow.h>
-#include "AP_Gripper/AP_Gripper.h"
 #include <AP_Proximity/AP_Proximity.h>
 #include "AP_Rally.h"
 #include <AP_SmartRTL/AP_SmartRTL.h>
@@ -90,7 +89,7 @@ public:
         k_param_gcs2,               // stream rates for SERIAL2
         k_param_serial2_baud_old,   // unused
         k_param_serial2_protocol,   // deprecated, can be deleted
-        k_param_serial_manager,     // serial manager library
+        k_param_serial_manager_old,     // serial manager library
         k_param_cli_enabled_old,    // unused
         k_param_gcs3,
         k_param_gcs_pid_mask,
@@ -258,7 +257,7 @@ public:
     // Throttle
     //
     AP_Int8     throttle_cruise;
-    AP_Int8     pilot_steer_type;
+    AP_Enum<PilotSteerType>     pilot_steer_type;
 
     // failsafe control
     AP_Int8     fs_action;
@@ -293,11 +292,6 @@ public:
     // var_info for holding Parameter information
     static const struct AP_Param::GroupInfo var_info[];
 
-#if STATS_ENABLED == ENABLED
-    // vehicle statistics
-    AP_Stats stats;
-#endif
-
     // whether to enforce acceptance of packets only from sysid_my_gcs
     AP_Int8 sysid_enforce;
 
@@ -307,7 +301,7 @@ public:
     // control over servo output ranges
     SRV_Channels servo_channels;
 
-#if ADVANCED_FAILSAFE == ENABLED
+#if AP_ROVER_ADVANCED_FAILSAFE_ENABLED
     // advanced failsafe library
     AP_AdvancedFailsafe_Rover afs;
 #endif
@@ -346,13 +340,15 @@ public:
     AP_Proximity proximity;
 #endif
 
-#if MODE_DOCK_ENABLED == ENABLED
+#if MODE_DOCK_ENABLED
     // we need a pointer to the mode for the G2 table
     class ModeDock *mode_dock_ptr;
 #endif
 
+#if AP_AVOIDANCE_ENABLED
     // avoidance library
     AC_Avoid avoid;
+#endif
 
     // pitch angle at 100% throttle
     AP_Float bal_pitch_max;
@@ -377,10 +373,6 @@ public:
     AC_Sprayer sprayer;
 #endif
 
-#if AP_GRIPPER_ENABLED
-    AP_Gripper gripper;
-#endif
-
 #if HAL_RALLY_ENABLED
     // Rally point library
     AP_Rally_Rover rally;
@@ -392,8 +384,10 @@ public:
     // windvane
     AP_WindVane windvane;
 
+#if AP_MISSION_ENABLED
     // mission behave
-    AP_Int8 mis_done_behave;
+    AP_Enum<ModeAuto::DoneBehaviour> mis_done_behave;
+#endif
 
     // balance both pitch trim
     AP_Float bal_pitch_trim;
@@ -401,18 +395,16 @@ public:
     // stick mixing for auto modes
     AP_Int8     stick_mixing;
 
-#if AP_SCRIPTING_ENABLED
-    AP_Scripting scripting;
-#endif // AP_SCRIPTING_ENABLED
-
     // waypoint navigation
     AR_WPNav_OA wp_nav;
 
     // Sailboat functions
     Sailboat sailboat;
 
+#if AP_OAPATHPLANNER_ENABLED
     // object avoidance path planning
     AP_OAPathPlanner oa;
+#endif
 
     // maximum speed for vehicle
     AP_Float speed_max;

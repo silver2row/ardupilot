@@ -33,7 +33,6 @@ on:
       - 'Tools/gittools/**'
       - 'Tools/Hello/**'
       - 'Tools/Linux_HAL_Essentials/**'
-      - 'Tools/LogAnalyzer/**'
       - 'Tools/mavproxy_modules/**'
       - 'Tools/Pozyx/**'
       - 'Tools/PrintVersion.py'
@@ -147,6 +146,22 @@ jobs:
           fi
           PATH="/github/home/.local/bin:$PATH"
           Tools/scripts/build_ci.sh
+
+      - name: Unittest extract_param_defaults
+        env:
+          PYTHONPATH: "${{ github.workspace }}/Tools/scripts:${{ github.workspace }}/modules/mavlink/pymavlink"
+        if: matrix.config == 'unit-tests'
+        run: |
+          Tools/autotest/unittest/extract_param_defaults_unittest.py
+
+      - name: Unittest annotate_params
+        env:
+          PYTHONPATH: "${{ github.workspace }}/Tools/scripts"
+        if: matrix.config == 'unit-tests'
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests mock
+          Tools/autotest/unittest/annotate_params_unittest.py
 
       - name: Archive buildlog artifacts
         uses: actions/upload-artifact@v3

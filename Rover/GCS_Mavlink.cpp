@@ -5,6 +5,7 @@
 #include <AP_RPM/AP_RPM_config.h>
 #include <AP_RangeFinder/AP_RangeFinder_Backend.h>
 #include <AP_EFI/AP_EFI_config.h>
+#include <AC_Avoidance/AP_OADatabase.h>
 
 MAV_TYPE GCS_Rover::frame_type() const
 {
@@ -123,11 +124,11 @@ void GCS_MAVLINK_Rover::send_servo_out()
 {
     float motor1, motor3;
     if (rover.g2.motors.have_skid_steering()) {
-        motor1 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_throttleLeft) / 1000.0f);
-        motor3 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_throttleRight) / 1000.0f);
+        motor1 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_throttleLeft) * 0.001f);
+        motor3 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_throttleRight) * 0.001f);
     } else {
         motor1 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_steering) / 4500.0f);
-        motor3 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_throttle) / 100.0f);
+        motor3 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_throttle) * 0.01f);
     }
     mavlink_msg_rc_channels_scaled_send(
         chan,
@@ -141,7 +142,12 @@ void GCS_MAVLINK_Rover::send_servo_out()
         0,
         0,
         0,
-        receiver_rssi());
+#if AP_RSSI_ENABLED
+        receiver_rssi()
+#else
+        255
+#endif
+        );
 }
 
 int16_t GCS_MAVLINK_Rover::vfr_hud_throttle() const
@@ -380,6 +386,7 @@ bool GCS_MAVLINK_Rover::try_send_message(enum ap_message id)
         rover.g2.windvane.send_wind(chan);
         break;
 
+#if AP_OADATABASE_ENABLED
     case MSG_ADSB_VEHICLE: {
         AP_OADatabase *oadb = AP::oadatabase();
         if (oadb != nullptr) {
@@ -391,6 +398,7 @@ bool GCS_MAVLINK_Rover::try_send_message(enum ap_message id)
         }
         break;
     }
+#endif
 
     default:
         return GCS_MAVLINK::try_send_message(id);
@@ -552,7 +560,9 @@ static const ap_message STREAM_RAW_CONTROLLER_msgs[] = {
 static const ap_message STREAM_RC_CHANNELS_msgs[] = {
     MSG_SERVO_OUTPUT_RAW,
     MSG_RC_CHANNELS,
+#if AP_MAVLINK_MSG_RC_CHANNELS_RAW_ENABLED
     MSG_RC_CHANNELS_RAW, // only sent on a mavlink1 connection
+#endif
 };
 static const ap_message STREAM_EXTRA1_msgs[] = {
     MSG_ATTITUDE,
@@ -568,7 +578,9 @@ static const ap_message STREAM_EXTRA2_msgs[] = {
 static const ap_message STREAM_EXTRA3_msgs[] = {
     MSG_AHRS,
     MSG_WIND,
+#if AP_RANGEFINDER_ENABLED
     MSG_RANGEFINDER,
+#endif
     MSG_DISTANCE_SENSOR,
     MSG_SYSTEM_TIME,
 #if AP_BATTERY_ENABLED
@@ -651,14 +663,6 @@ MAV_RESULT GCS_MAVLINK_Rover::_handle_command_preflight_calibration(const mavlin
     return GCS_MAVLINK::_handle_command_preflight_calibration(packet, msg);
 }
 
-bool GCS_MAVLINK_Rover::set_home_to_current_location(bool _lock) {
-    return rover.set_home_to_current_location(_lock);
-}
-
-bool GCS_MAVLINK_Rover::set_home(const Location& loc, bool _lock) {
-    return rover.set_home(loc, _lock);
-}
-
 MAV_RESULT GCS_MAVLINK_Rover::handle_command_int_packet(const mavlink_command_int_t &packet, const mavlink_message_t &msg)
 {
     switch (packet.command) {
@@ -697,6 +701,10 @@ MAV_RESULT GCS_MAVLINK_Rover::handle_command_int_packet(const mavlink_command_in
                                               packet.param4);
 
     case MAV_CMD_MISSION_START:
+        if (!is_zero(packet.param1) || !is_zero(packet.param2)) {
+            // first-item/last item not supported
+            return MAV_RESULT_DENIED;
+        }
         if (rover.set_mode(rover.mode_auto, ModeReason::GCS_COMMAND)) {
             return MAV_RESULT_ACCEPTED;
         }
@@ -777,7 +785,7 @@ MAV_RESULT GCS_MAVLINK_Rover::handle_command_int_do_reposition(const mavlink_com
     return MAV_RESULT_ACCEPTED;
 }
 
-void GCS_MAVLINK_Rover::handleMessage(const mavlink_message_t &msg)
+void GCS_MAVLINK_Rover::handle_message(const mavlink_message_t &msg)
 {
     switch (msg.msgid) {
 
@@ -793,13 +801,8 @@ void GCS_MAVLINK_Rover::handleMessage(const mavlink_message_t &msg)
         handle_set_position_target_global_int(msg);
         break;
 
-    case MAVLINK_MSG_ID_RADIO:
-    case MAVLINK_MSG_ID_RADIO_STATUS:
-        handle_radio(msg);
-        break;
-
     default:
-        handle_common_message(msg);
+        GCS_MAVLINK::handle_message(msg);
         break;
     }
 }
@@ -859,10 +862,14 @@ void GCS_MAVLINK_Rover::handle_set_position_target_local_ned(const mavlink_messa
     }
 
     // check for supported coordinate frames
-    if (packet.coordinate_frame != MAV_FRAME_LOCAL_NED &&
-        packet.coordinate_frame != MAV_FRAME_LOCAL_OFFSET_NED &&
-        packet.coordinate_frame != MAV_FRAME_BODY_NED &&
-        packet.coordinate_frame != MAV_FRAME_BODY_OFFSET_NED) {
+    switch (packet.coordinate_frame) {
+    case MAV_FRAME_LOCAL_NED:
+    case MAV_FRAME_LOCAL_OFFSET_NED:
+    case MAV_FRAME_BODY_NED:
+    case MAV_FRAME_BODY_OFFSET_NED:
+        break;
+
+    default:
         return;
     }
 
@@ -978,14 +985,19 @@ void GCS_MAVLINK_Rover::handle_set_position_target_global_int(const mavlink_mess
         return;
     }
     // check for supported coordinate frames
-    if (packet.coordinate_frame != MAV_FRAME_GLOBAL &&
-        packet.coordinate_frame != MAV_FRAME_GLOBAL_INT &&
-        packet.coordinate_frame != MAV_FRAME_GLOBAL_RELATIVE_ALT &&
-        packet.coordinate_frame != MAV_FRAME_GLOBAL_RELATIVE_ALT_INT &&
-        packet.coordinate_frame != MAV_FRAME_GLOBAL_TERRAIN_ALT &&
-        packet.coordinate_frame != MAV_FRAME_GLOBAL_TERRAIN_ALT_INT) {
+    switch (packet.coordinate_frame) {
+    case MAV_FRAME_GLOBAL:
+    case MAV_FRAME_GLOBAL_INT:
+    case MAV_FRAME_GLOBAL_RELATIVE_ALT:
+    case MAV_FRAME_GLOBAL_RELATIVE_ALT_INT:
+    case MAV_FRAME_GLOBAL_TERRAIN_ALT:
+    case MAV_FRAME_GLOBAL_TERRAIN_ALT_INT:
+        break;
+
+    default:
         return;
     }
+    
     bool pos_ignore = packet.type_mask & MAVLINK_SET_POS_TYPE_MASK_POS_IGNORE;
     bool vel_ignore = packet.type_mask & MAVLINK_SET_POS_TYPE_MASK_VEL_IGNORE;
     bool acc_ignore = packet.type_mask & MAVLINK_SET_POS_TYPE_MASK_ACC_IGNORE;
@@ -1061,11 +1073,6 @@ void GCS_MAVLINK_Rover::handle_set_position_target_global_int(const mavlink_mess
         // consume just turn rate(probably only skid steering vehicles can do this)
         rover.mode_guided.set_desired_turn_rate_and_speed(target_turn_rate_cds, 0.0f);
     }
-}
-
-void GCS_MAVLINK_Rover::handle_radio(const mavlink_message_t &msg)
-{
-    handle_radio_status(msg, rover.should_log(MASK_LOG_PM));
 }
 
 /*

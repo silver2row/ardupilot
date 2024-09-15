@@ -18,6 +18,12 @@ import shutil
 import filecmp
 
 
+class ChibiOSHWDefIncludeNotFoundException(Exception):
+    def __init__(self, hwdef, includer):
+        self.hwdef = hwdef
+        self.includer = includer
+
+
 class ChibiOSHWDef(object):
 
     # output variables for each pin
@@ -32,6 +38,11 @@ class ChibiOSHWDef(object):
         self.signed_fw = signed_fw
         self.default_params_filepath = default_params_filepath
         self.quiet = quiet
+        self.have_defaults_file = False
+
+        # if true then parameters will be appended in special apj-tool
+        # section at end of binary:
+        self.force_apj_default_parameters = False
 
         self.default_gpio = ['INPUT', 'FLOATING']
 
@@ -124,6 +135,9 @@ class ChibiOSHWDef(object):
         # list of shared up timers
         self.shared_up = []
 
+        # boolean indicating whether we have read and processed self.hwdef
+        self.processed_hwdefs = False
+
     def is_int(self, str):
         '''check if a string is an integer'''
         try:
@@ -182,9 +196,9 @@ class ChibiOSHWDef(object):
                     return 0
             return None
 
-        if function and function.endswith("_RTS") and (
+        if function and (function.endswith("_RTS") or function.endswith("_CTS_GPIO")) and (
                 function.startswith('USART') or function.startswith('UART')):
-            # we do software RTS
+            # we do software RTS and can do either software CTS or hardware CTS
             return None
 
         for label in self.af_labels:
@@ -685,11 +699,13 @@ class ChibiOSHWDef(object):
         return lib.mcu[name]
 
     def get_ram_reserve_start(self):
-        '''get amount of memory to reserve for bootloader comms'''
+        '''get amount of memory to reserve for bootloader comms and the address if non-zero'''
         ram_reserve_start = self.get_config('RAM_RESERVE_START', default=0, type=int)
         if ram_reserve_start == 0 and self.is_periph_fw():
             ram_reserve_start = 256
-        return ram_reserve_start
+        ram_map_bootloader = self.get_ram_map(use_bootloader=True)
+        ram0_start_address = ram_map_bootloader[0][0]
+        return ram_reserve_start, ram0_start_address
 
     def make_line(self, label):
         '''return a line for a label'''
@@ -749,23 +765,15 @@ class ChibiOSHWDef(object):
     def has_sdcard_spi(self):
         '''check for sdcard connected to spi bus'''
         for dev in self.spidev:
-            if(dev[0] == 'sdcard'):
+            if dev[0] == 'sdcard':
                 return True
         return False
 
-    def get_ram_map(self):
+    def get_ram_map(self, use_bootloader=False):
         '''get RAM_MAP. May be different for bootloader'''
-        if 'APP_RAM_START' not in self.env_vars:
-            self.env_vars['APP_RAM_START'] = None
-        if self.is_bootloader_fw():
+        if self.is_bootloader_fw() or use_bootloader:
             ram_map = self.get_mcu_config('RAM_MAP_BOOTLOADER', False)
             if ram_map is not None:
-                app_ram_map = self.get_mcu_config('RAM_MAP', False)
-                if app_ram_map is not None and app_ram_map[0][0] != ram_map[0][0]:
-                    # we need to find the location of app_ram_map[0] in ram_map
-                    for i in range(len(ram_map)):
-                        if app_ram_map[0][0] == ram_map[i][0] and self.env_vars['APP_RAM_START'] is None:
-                            self.env_vars['APP_RAM_START'] = i
                 return ram_map
         elif self.env_vars['EXT_FLASH_SIZE_MB'] and not self.env_vars['INT_FLASH_PRIMARY']:
             ram_map = self.get_mcu_config('RAM_MAP_EXTERNAL_FLASH', False)
@@ -778,6 +786,7 @@ class ChibiOSHWDef(object):
 
     def get_flash_pages_sizes(self):
         mcu_series = self.mcu_series
+        mcu_type = self.mcu_type
         if mcu_series.startswith('STM32F4') or mcu_series.startswith('CKS32F4'):
             if self.get_config('FLASH_SIZE_KB', type=int) == 512:
                 return [16, 16, 16, 16, 64, 128, 128, 128]
@@ -804,6 +813,8 @@ class ChibiOSHWDef(object):
                         256, 256, 256, 256]
             else:
                 raise Exception("Unsupported flash size %u" % self.get_config('FLASH_SIZE_KB', type=int))
+        elif mcu_type.startswith('STM32H7A'):
+            return [8] * (self.get_config('FLASH_SIZE_KB', type=int)//8)
         elif mcu_series.startswith('STM32H7'):
             return [128] * (self.get_config('FLASH_SIZE_KB', type=int)//128)
         elif mcu_series.startswith('STM32F100') or mcu_series.startswith('STM32F103'):
@@ -855,8 +866,8 @@ class ChibiOSHWDef(object):
         storage_flash_page = self.get_config('STORAGE_FLASH_PAGE', default=None, type=int, required=False)
         if storage_flash_page is not None:
             return storage_flash_page
-        if self.is_bootloader_fw() and args.hwdef[0].find("-bl") != -1:
-            hwdefdat = args.hwdef[0].replace("-bl", "")
+        if self.is_bootloader_fw() and self.hwdef[0].find("-bl") != -1:
+            hwdefdat = self.hwdef[0].replace("-bl", "")
             if os.path.exists(hwdefdat):
                 ret = None
                 lines = self.load_file_with_include(hwdefdat)
@@ -875,6 +886,8 @@ class ChibiOSHWDef(object):
         storage_flash_page = self.get_storage_flash_page()
         pages = self.get_flash_pages_sizes()
         page_size = pages[storage_flash_page] * 1024
+        if self.intdefines.get('AP_FLASH_STORAGE_DOUBLE_PAGE', 0) == 1:
+            page_size *= 2
         storage_size = self.intdefines.get('HAL_STORAGE_SIZE', None)
         if storage_size is None:
             self.error('Need HAL_STORAGE_SIZE define')
@@ -914,7 +927,7 @@ class ChibiOSHWDef(object):
 
     def write_mcu_config(self, f):
         '''write MCU config defines'''
-        f.write('#define CHIBIOS_BOARD_NAME "%s"\n' % os.path.basename(os.path.dirname(args.hwdef[0])))
+        f.write('#define CHIBIOS_BOARD_NAME "%s"\n' % os.path.basename(os.path.dirname(self.hwdef[0])))
         f.write('// MCU type (ChibiOS define)\n')
         f.write('#define %s_MCUCONF\n' % self.get_config('MCU'))
         mcu_subtype = self.get_config('MCU', 1)
@@ -1103,7 +1116,13 @@ class ChibiOSHWDef(object):
             f.write('#define APP_START_OFFSET_KB %u\n' % self.get_config('APP_START_OFFSET_KB', default=0, type=int))
         f.write('\n')
 
+        ram_reserve_start, ram0_start_address = self.get_ram_reserve_start()
+        f.write('#define HAL_RAM0_START 0x%08x\n' % ram0_start_address)
+        if ram_reserve_start > 0:
+            f.write('#define HAL_RAM_RESERVE_START 0x%08x\n' % ram_reserve_start)
+
         ram_map = self.get_ram_map()
+
         f.write('// memory regions\n')
         regions = []
         cc_regions = []
@@ -1111,8 +1130,7 @@ class ChibiOSHWDef(object):
         for (address, size, flags) in ram_map:
             size *= 1024
             cc_regions.append('{0x%08x, 0x%08x, CRASH_CATCHER_BYTE }' % (address, address + size))
-            if self.env_vars['APP_RAM_START'] is not None and address == ram_map[self.env_vars['APP_RAM_START']][0]:
-                ram_reserve_start = self.get_ram_reserve_start()
+            if address == ram0_start_address:
                 address += ram_reserve_start
                 size -= ram_reserve_start
             regions.append('{(void*)0x%08x, 0x%08x, 0x%02x }' % (address, size, flags))
@@ -1120,14 +1138,6 @@ class ChibiOSHWDef(object):
         f.write('#define HAL_MEMORY_REGIONS %s\n' % ', '.join(regions))
         f.write('#define HAL_CC_MEMORY_REGIONS %s\n' % ', '.join(cc_regions))
         f.write('#define HAL_MEMORY_TOTAL_KB %u\n' % (total_memory/1024))
-
-        if self.env_vars['APP_RAM_START'] is not None:
-            f.write('#define HAL_RAM0_START 0x%08x\n' % ram_map[self.env_vars['APP_RAM_START']][0])
-        else:
-            f.write('#define HAL_RAM0_START 0x%08x\n' % ram_map[0][0])
-        ram_reserve_start = self.get_ram_reserve_start()
-        if ram_reserve_start > 0:
-            f.write('#define HAL_RAM_RESERVE_START 0x%08x\n' % ram_reserve_start)
 
         f.write('\n// CPU serial number (12 bytes)\n')
         udid_start = self.get_mcu_config('UDID_START')
@@ -1207,25 +1217,7 @@ class ChibiOSHWDef(object):
 
         # setup for bootloader build
         if self.is_bootloader_fw():
-            if self.get_config('FULL_CHIBIOS_BOOTLOADER', required=False, default=False):
-                # we got enough space to fit everything so we enable almost everything
-                f.write('''
-#define HAL_BOOTLOADER_BUILD TRUE
-#define HAL_USE_ADC FALSE
-#define HAL_USE_EXT FALSE
-#define HAL_USE_I2C FALSE
-#define HAL_USE_PWM FALSE
-#define HAL_NO_UARTDRIVER
-#ifndef CH_CFG_USE_DYNAMIC
-#define CH_CFG_USE_DYNAMIC FALSE
-#endif
-#define HAL_USE_EMPTY_STORAGE 1
-#ifndef HAL_STORAGE_SIZE
-#define HAL_STORAGE_SIZE 16384
-#endif
-''')
-            else:
-                f.write('''
+            f.write('''
 #define HAL_BOOTLOADER_BUILD TRUE
 #define HAL_USE_ADC FALSE
 #define HAL_USE_EXT FALSE
@@ -1238,7 +1230,9 @@ class ChibiOSHWDef(object):
 // avoid timer and RCIN threads to save memory
 #define HAL_NO_TIMER_THREAD
 #define HAL_NO_RCOUT_THREAD
-#define HAL_NO_RCIN_THREAD
+#ifndef HAL_RCIN_THREAD_ENABLED
+#define HAL_RCIN_THREAD_ENABLED 0
+#endif
 #ifndef AP_HAL_SHARED_DMA_ENABLED
 #define AP_HAL_SHARED_DMA_ENABLED 0
 #endif
@@ -1257,7 +1251,9 @@ class ChibiOSHWDef(object):
 #ifndef CH_CFG_USE_MUTEXES
 #define CH_CFG_USE_MUTEXES FALSE
 #endif
+#ifndef CH_CFG_USE_EVENTS
 #define CH_CFG_USE_EVENTS FALSE
+#endif
 #define CH_CFG_USE_EVENTS_TIMEOUT FALSE
 #define CH_CFG_OPTIMIZE_SPEED FALSE
 #define HAL_USE_EMPTY_STORAGE 1
@@ -1271,7 +1267,12 @@ class ChibiOSHWDef(object):
 #endif
 #define STM32_FLASH_DISABLE_ISR 0
 ''')
-            if not self.env_vars['EXT_FLASH_SIZE_MB'] and not args.signed_fw:
+            # get bootloader flash space, if larger than 128k we can enable Heap
+            flash_size = self.get_config('FLASH_USE_MAX_KB', type=int, default=0)
+            if flash_size == 0:
+                flash_size = self.get_config('FLASH_SIZE_KB', type=int)
+            flash_length = min(flash_size, self.get_config('FLASH_BOOTLOADER_LOAD_KB', type=int))
+            if not self.env_vars['EXT_FLASH_SIZE_MB'] and not self.signed_fw and flash_length < 128:
                 f.write('''
 #ifndef CH_CFG_USE_MEMCORE
 #define CH_CFG_USE_MEMCORE FALSE
@@ -1383,10 +1384,8 @@ class ChibiOSHWDef(object):
         if ext_flash_size > 32:
             self.error("We only support 24bit addressing over external flash")
 
-        if self.env_vars['APP_RAM_START'] is None:
-            # default to start of ram for shared ram
-            # possibly reserve some memory for app/bootloader comms
-            ram_reserve_start = self.get_ram_reserve_start()
+        ram_reserve_start, ram0_start_address = self.get_ram_reserve_start()
+        if ram_reserve_start > 0 and ram0_start_address == ram0_start:
             ram0_start += ram_reserve_start
             ram0_len -= ram_reserve_start
         if ext_flash_length == 0 or self.is_bootloader_fw():
@@ -1473,7 +1472,7 @@ INCLUDE common.ld
         if self.is_bootloader_fw():
             default_product += "-BL"
         product_string = self.get_config("USB_STRING_PRODUCT", default="\"%s\"" % default_product)
-        if self.is_bootloader_fw() and args.signed_fw:
+        if self.is_bootloader_fw() and self.signed_fw:
             product_string = product_string.replace("-BL", "-Secure-BL-v10")
         f.write('#define HAL_USB_STRING_PRODUCT %s\n' % product_string)
 
@@ -1856,7 +1855,7 @@ INCLUDE common.ld
             if 'io_firmware.bin' not in self.romfs:
                 self.error("Need io_firmware.bin in ROMFS for IOMCU")
 
-            f.write('#define HAL_WITH_IO_MCU 1\n')
+            self.write_defaulting_define(f, 'HAL_WITH_IO_MCU', 1)
             f.write('#define HAL_UART_IOMCU_IDX %u\n' % len(serial_list))
             f.write(
                 '#define HAL_UART_IO_DRIVER ChibiOS::UARTDriver uart_io(HAL_UART_IOMCU_IDX)\n'
@@ -1873,6 +1872,7 @@ INCLUDE common.ld
         OTG2_index = None
         devlist = []
         have_rts_cts = False
+        have_low_noise = False
         crash_uart = None
 
         # write config for CrashCatcher UART
@@ -1886,6 +1886,14 @@ INCLUDE common.ld
             f.write('#define IRQ_DISABLE_HAL_CRASH_SERIAL_PORT() nvicDisableVector(STM32_%s_NUMBER)\n' % crash_uart)
             f.write('#define RCC_RESET_HAL_CRASH_SERIAL_PORT() rccReset%s(); rccEnable%s(true)\n' % (crash_uart, crash_uart))
             f.write('#define HAL_CRASH_SERIAL_PORT_CLOCK STM32_%sCLK\n' % crash_uart)
+        # check if we have a UART with a low noise RX pin
+        for num, dev in enumerate(serial_list):
+            if not dev.startswith('UART') and not dev.startswith('USART'):
+                continue
+            rx_port = dev + '_RX'
+            if rx_port in self.bylabel and self.bylabel[rx_port].has_extra('LOW_NOISE'):
+                have_low_noise = True
+                break
         for num, dev in enumerate(serial_list):
             if dev.startswith('UART'):
                 n = int(dev[4:])
@@ -1901,20 +1909,31 @@ INCLUDE common.ld
             devlist.append('HAL_%s_CONFIG' % dev)
             tx_line = self.make_line(dev + '_TX')
             rx_line = self.make_line(dev + '_RX')
-            rts_line = self.make_line(dev + '_RTS')
+            rts_line_name = dev + '_RTS'
+            rts_line = self.make_line(rts_line_name)
             cts_line = self.make_line(dev + '_CTS')
+            if cts_line == "0":
+                cts_line = self.make_line(dev + '_CTS_GPIO')
             if rts_line != "0":
                 have_rts_cts = True
                 f.write('#define HAL_HAVE_RTSCTS_SERIAL%u\n' % num)
 
             if dev.startswith('OTG2'):
                 f.write(
-                    '#define HAL_%s_CONFIG {(BaseSequentialStream*) &SDU2, 2, true, false, 0, 0, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}\n' % dev)  # noqa
+                    '#define HAL_%s_CONFIG {(BaseSequentialStream*) &SDU2, 2, true, false, 0, 0, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, UINT8_MAX,' % dev)  # noqa
+                if have_low_noise:
+                    f.write('false}\n')
+                else:
+                    f.write('}\n')
                 OTG2_index = serial_list.index(dev)
                 self.dual_USB_enabled = True
             elif dev.startswith('OTG'):
                 f.write(
-                    '#define HAL_%s_CONFIG {(BaseSequentialStream*) &SDU1, 1, true, false, 0, 0, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}\n' % dev)  # noqa
+                    '#define HAL_%s_CONFIG {(BaseSequentialStream*) &SDU1, 1, true, false, 0, 0, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, UINT8_MAX,' % dev)  # noqa
+                if have_low_noise:
+                    f.write('false}\n')
+                else:
+                    f.write('}\n')
             else:
                 need_uart_driver = True
                 f.write(
@@ -1930,7 +1949,40 @@ INCLUDE common.ld
                 f.write("%d, " % self.get_gpio_bylabel(dev + "_RXINV"))
                 f.write("%s, " % self.get_extra_bylabel(dev + "_RXINV", "POL", "0"))
                 f.write("%d, " % self.get_gpio_bylabel(dev + "_TXINV"))
-                f.write("%s, 0}\n" % self.get_extra_bylabel(dev + "_TXINV", "POL", "0"))
+                f.write("%s, " % self.get_extra_bylabel(dev + "_TXINV", "POL", "0"))
+
+                # USB endpoint ID, not used
+                f.write("0, ")
+
+                # Find and add RTS alt fuction number if avalable
+                def get_RTS_alt_function():
+                    # Typicaly we do software RTS control, so there is
+                    # no requirement for the pin to have valid UART
+                    # RTS alternative function
+                    # If it does this enables hardware flow control for RS-485
+                    lib = self.get_mcu_lib(self.mcu_type)
+                    if (rts_line == "0") or (rts_line_name not in self.bylabel) or not hasattr(lib, "AltFunction_map"):
+                        # No pin, 0 is a valid alt function, use UINT8_MAX for invalid
+                        return "UINT8_MAX"
+
+                    pin = self.bylabel[rts_line_name]
+                    for label in self.af_labels:
+                        if rts_line_name.startswith(label):
+                            s = pin.portpin + ":" + rts_line_name
+                            if s not in lib.AltFunction_map:
+                                return "UINT8_MAX"
+                            return lib.AltFunction_map[s]
+                if have_low_noise:
+                    low_noise = 'false'
+                    rx_port = dev + '_RX'
+                    if rx_port in self.bylabel and self.bylabel[rx_port].has_extra('LOW_NOISE'):
+                        low_noise = 'true'
+                    f.write("%s, %s}\n" % (get_RTS_alt_function(), low_noise))
+                else:
+                    f.write("%s}\n" % get_RTS_alt_function())
+
+        if have_low_noise:
+            f.write('#define HAL_HAVE_LOW_NOISE_UART 1\n')
         if have_rts_cts:
             f.write('#define AP_FEATURE_RTSCTS 1\n')
         if OTG2_index is not None:
@@ -2388,12 +2440,13 @@ INCLUDE common.ld
         gpios = sorted(gpios)
         for (gpio, pwm, port, pin, p, enabled) in gpios:
             f.write('#define HAL_GPIO_LINE_GPIO%u PAL_LINE(GPIO%s,%uU)\n' % (gpio, port, pin))
-        f.write('#define HAL_GPIO_PINS { \\\n')
-        for (gpio, pwm, port, pin, p, enabled) in gpios:
-            f.write('{ %3u, %s, %2u, PAL_LINE(GPIO%s,%uU)}, /* %s */ \\\n' %
-                    (gpio, enabled, pwm, port, pin, p))
-        # and write #defines for use by config code
-        f.write('}\n\n')
+        if len(gpios) > 0:
+            f.write('#define HAL_GPIO_PINS { \\\n')
+            for (gpio, pwm, port, pin, p, enabled) in gpios:
+                f.write('{ %3u, %s, %2u, PAL_LINE(GPIO%s,%uU)}, /* %s */ \\\n' %
+                        (gpio, enabled, pwm, port, pin, p))
+            # and write #defines for use by config code
+            f.write('}\n\n')
         f.write('// full pin define list\n')
         last_label = None
         for label in sorted(list(set(self.bylabel.keys()))):
@@ -2411,7 +2464,11 @@ INCLUDE common.ld
         # always embed a bootloader if it is available
         this_dir = os.path.realpath(__file__)
         rootdir = os.path.relpath(os.path.join(this_dir, "../../../../.."))
-        hwdef_dirname = os.path.basename(os.path.dirname(args.hwdef[0]))
+        hwdef_dirname = os.path.basename(os.path.dirname(self.hwdef[0]))
+        # allow re-using of bootloader from different build:
+        use_bootloader_from_board = self.get_config('USE_BOOTLOADER_FROM_BOARD', default=None, required=False)
+        if use_bootloader_from_board is not None:
+            hwdef_dirname = use_bootloader_from_board
         bootloader_filename = "%s_bl.bin" % (hwdef_dirname,)
         bootloader_path = os.path.join(rootdir,
                                        "Tools",
@@ -2436,7 +2493,7 @@ INCLUDE common.ld
             self.error('''Bootloader (%s) does not exist and AP_BOOTLOADER_FLASHING_ENABLED
 Please run: Tools/scripts/build_bootloaders.py %s
 ''' %
-                       (bp, os.path.basename(os.path.dirname(args.hwdef[0]))))
+                       (bp, os.path.basename(os.path.dirname(self.hwdef[0]))))
 
         bp = os.path.realpath(bp)
 
@@ -2517,8 +2574,16 @@ Please run: Tools/scripts/build_bootloaders.py %s
         f = open(hwdat, 'w')
         f.write('\n'.join(self.all_lines))
         f.close()
-        if not self.is_periph_fw():
+        if not self.is_periph_fw() and not os.getenv("NO_ROMFS_HWDEF", False):
             self.romfs["hwdef.dat"] = hwdat
+
+    def write_defaulting_define(self, f, name, value):
+        f.write(f"#ifndef {name}\n")
+        f.write(f"#define {name} {value}\n")
+        f.write("#endif\n")
+
+    def write_define(self, f, name, value):
+        f.write(f"#define {name} {value}\n")
 
     def write_hwdef_header(self, outfilename):
         '''write hwdef header file'''
@@ -2545,7 +2610,7 @@ Please run: Tools/scripts/build_bootloaders.py %s
 
 ''')
 
-        if args.signed_fw:
+        if self.signed_fw:
             f.write('''
 #define AP_SIGNED_FIRMWARE 1
 ''')
@@ -2580,7 +2645,19 @@ Please run: Tools/scripts/build_bootloaders.py %s
         self.write_board_validate_macro(f)
         self.write_check_firmware(f)
 
+        if self.have_defaults_file:
+            f.write('''
+#ifndef AP_FILESYSTEM_ROMFS_ENABLED
+#define AP_FILESYSTEM_ROMFS_ENABLED 1
+#endif
+''')
+
         self.write_peripheral_enable(f)
+
+        if os.path.exists(self.processed_defaults_filepath()):
+            self.write_define(f, 'AP_PARAM_DEFAULTS_FILE_PARSING_ENABLED', 1)
+        else:
+            self.write_define(f, 'AP_PARAM_DEFAULTS_FILE_PARSING_ENABLED', 0)
 
         if self.mcu_series.startswith("STM32H7"):
             # add in ADC3 on H7 to get MCU temperature and reference voltage
@@ -2610,9 +2687,6 @@ Please run: Tools/scripts/build_bootloaders.py %s
         self.write_USB_config(f)
 
         self.embed_bootloader(f)
-
-        if len(self.romfs) > 0:
-            f.write('#define HAL_HAVE_AP_ROMFS_EMBEDDED_H 1\n')
 
         if self.mcu_series.startswith('STM32F1'):
             f.write('''
@@ -2814,8 +2888,8 @@ Please run: Tools/scripts/build_bootloaders.py %s
 
     def write_processed_defaults_file(self, filepath):
         # see if board has a defaults.parm file or a --default-parameters file was specified
-        defaults_filename = os.path.join(os.path.dirname(args.hwdef[0]), 'defaults.parm')
-        defaults_path = os.path.join(os.path.dirname(args.hwdef[0]), args.params)
+        defaults_filename = os.path.join(os.path.dirname(self.hwdef[0]), 'defaults.parm')
+        defaults_path = os.path.join(os.path.dirname(self.hwdef[0]), args.params)
 
         defaults_abspath = None
         if os.path.exists(defaults_path):
@@ -2827,14 +2901,14 @@ Please run: Tools/scripts/build_bootloaders.py %s
 
         if defaults_abspath is None:
             self.progress("No default parameter file found")
-            return
+            return False
 
         content = self.get_processed_defaults_file(defaults_abspath)
 
         with open(filepath, "w") as processed_defaults_fh:
             processed_defaults_fh.write(content)
 
-        self.env_vars['DEFAULT_PARAMETERS'] = filepath
+        return True
 
     def write_env_py(self, filename):
         '''write out env.py for environment variables to control the build process'''
@@ -2854,10 +2928,13 @@ Please run: Tools/scripts/build_bootloaders.py %s
             if fnmatch.fnmatch(f, pattern):
                 self.romfs[f] = os.path.join(pattern_dir, f)
 
-    def romfs_add_dir(self, subdirs):
+    def romfs_add_dir(self, subdirs, relative_to_base=False):
         '''add a filesystem directory to ROMFS'''
         for dirname in subdirs:
-            romfs_dir = os.path.join(os.path.dirname(args.hwdef[0]), dirname)
+            if relative_to_base:
+                romfs_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', dirname)
+            else:
+                romfs_dir = os.path.join(os.path.dirname(self.hwdef[0]), dirname)
             if not self.is_bootloader_fw() and os.path.exists(romfs_dir):
                 for root, d, files in os.walk(romfs_dir):
                     for f in files:
@@ -2866,6 +2943,8 @@ Please run: Tools/scripts/build_bootloaders.py %s
                             continue
                         fullpath = os.path.join(root, f)
                         relpath = os.path.normpath(os.path.join(dirname, os.path.relpath(root, romfs_dir), f))
+                        if relative_to_base:
+                            relpath = relpath[len(dirname)+1:]
                         self.romfs[relpath] = fullpath
 
     def valid_type(self, ptype, label):
@@ -2896,18 +2975,18 @@ Please run: Tools/scripts/build_bootloaders.py %s
         if ptype == 'OUTPUT' and re.match(r'US?ART\d+_(TXINV|RXINV)', label):
             return True
         m1 = re.match(r'USART(\d+)', ptype)
-        m2 = re.match(r'USART(\d+)_(RX|TX|CTS|RTS)', label)
+        m2 = re.match(r'USART(\d+)_(RX|TX|CTS|RTS|CTS_GPIO)', label)
         if (m1 and not m2) or (m2 and not m1) or (m1 and m1.group(1) != m2.group(1)):
             '''usart numbers need to match'''
             return False
         m1 = re.match(r'UART(\d+)', ptype)
-        m2 = re.match(r'UART(\d+)_(RX|TX|CTS|RTS)', label)
+        m2 = re.match(r'UART(\d+)_(RX|TX|CTS|RTS|CTS_GPIO)', label)
         if (m1 and not m2) or (m2 and not m1) or (m1 and m1.group(1) != m2.group(1)):
             '''uart numbers need to match'''
             return False
         return True
 
-    def process_line(self, line):
+    def process_line(self, line, depth):
         '''process one line of pin definition file'''
         self.all_lines.append(line)
         a = shlex.split(line, posix=False)
@@ -2996,6 +3075,8 @@ Please run: Tools/scripts/build_bootloaders.py %s
             self.romfs_add(a[1], a[2])
         elif a[0] == 'ROMFS_WILDCARD':
             self.romfs_wildcard(a[1])
+        elif a[0] == 'ROMFS_DIRECTORY':
+            self.romfs_add_dir([a[1]], relative_to_base=True)
         elif a[0] == 'undef':
             for u in a[1:]:
                 self.progress("Removing %s" % u)
@@ -3029,6 +3110,8 @@ Please run: Tools/scripts/build_bootloaders.py %s
                     self.baro_list = []
                 if u == 'AIRSPEED':
                     self.airspeed_list = []
+                if u == 'ROMFS':
+                    self.romfs = {}
         elif a[0] == 'env':
             self.progress("Adding environment %s" % ' '.join(a[1:]))
             if len(a[1:]) < 2:
@@ -3037,22 +3120,26 @@ Please run: Tools/scripts/build_bootloaders.py %s
             value = ' '.join(a[2:])
             if name == 'AP_PERIPH' and value != "1":
                 raise ValueError("AP_PERIPH may only have value 1")
-            if name == 'APP_RAM_START':
-                value = int(value, 0)
             self.env_vars[name] = value
         elif a[0] == 'define':
             # extract numerical defines for processing by other parts of the script
-            result = re.match(r'define\s*([A-Z_]+)\s*([0-9]+)', line)
+            result = re.match(r'define\s*([A-Z_0-9]+)\s+([0-9]+)', line)
             if result:
-                self.intdefines[result.group(1)] = int(result.group(2))
+                (name, intvalue) = (result.group(1), int(result.group(2)))
+                if name in self.intdefines and self.intdefines[name] == intvalue:
+                    msg = f"{name} already in defines with same value"
+                    if depth == 0:
+                        print(msg)
+                        # raise ValueError(msg)
 
+                self.intdefines[name] = intvalue
 
     def progress(self, message):
         if self.quiet:
             return
         print(message)
 
-    def process_file(self, filename):
+    def process_file(self, filename, depth=0):
         '''process a hwdef.dat file'''
         try:
             f = open(filename, "r")
@@ -3071,9 +3158,9 @@ Please run: Tools/scripts/build_bootloaders.py %s
                     include_file = os.path.normpath(
                         os.path.join(dir, include_file))
                 self.progress("Including %s" % include_file)
-                self.process_file(include_file)
+                self.process_file(include_file, depth+1)
             else:
-                self.process_line(line)
+                self.process_line(line, depth)
 
     def add_apperiph_defaults(self, f):
         '''add default defines for peripherals'''
@@ -3119,7 +3206,40 @@ Please run: Tools/scripts/build_bootloaders.py %s
 
         self.add_firmware_defaults_from_file(f, "defaults_iofirmware.h", "IOMCU Firmware")
 
+    def is_periph_fw_unprocessed_file(self, hwdef, includer=None):
+        '''helper/recursion function for is_periph_fw_unprocessed'''
+        if not os.path.exists(hwdef):
+            raise ChibiOSHWDefIncludeNotFoundException(
+                os.path.normpath(hwdef),
+                os.path.normpath(includer)
+            )
+        with open(hwdef, "r") as f:
+            content = f.read()
+            if 'AP_PERIPH' in content:
+                return True
+            # process any include lines:
+            for m in re.finditer(r"^include\s+([^\s]*)", content, re.MULTILINE):
+                include_path = os.path.join(os.path.dirname(hwdef), m.group(1))
+                if self.is_periph_fw_unprocessed_file(include_path, includer=hwdef):
+                    return True
+
+    def is_periph_fw_unprocessed(self):
+        '''it takes ~2 seconds to process all hwdefs.  This is a shortcut to
+        make things much faster in the case we are filtering boards to
+        just peripherals.  Note that this parsing is very coarse -
+        AP_PERIPH could be in a comment or part of a define
+        (e.g. AP_PERIPH_GPS_SUPPORT), for example, and this method
+        will still return True.  Also can't "undef" AP_PERIPH - if we
+        ever see the string we return true.
+        '''
+        for hwdef in self.hwdef:
+            if self.is_periph_fw_unprocessed_file(hwdef):
+                return True
+        return False
+
     def is_periph_fw(self):
+        if not self.processed_hwdefs:
+            raise ValueError("Need to process_hwdefs() first")
         return int(self.env_vars.get('AP_PERIPH', 0)) != 0
 
     def is_normal_fw(self):
@@ -3141,11 +3261,40 @@ Please run: Tools/scripts/build_bootloaders.py %s
 
         self.add_firmware_defaults_from_file(f, "defaults_normal.h", "normal")
 
-    def run(self):
+    def processed_defaults_filepath(self):
+        return os.path.join(self.outdir, "processed_defaults.parm")
 
-        # process input file
+    def write_default_parameters(self):
+        '''handle default parameters'''
+
+        if self.is_bootloader_fw():
+            return
+
+        if self.is_io_fw():
+            return
+
+        filepath = self.processed_defaults_filepath()
+        if not self.write_processed_defaults_file(filepath):
+            return
+
+        if self.get_config('FORCE_APJ_DEFAULT_PARAMETERS', default=False):
+            # set env variable so that post-processing in waf uses
+            # apj-tool to append parameters to image:
+            if os.path.exists(filepath):
+                self.env_vars['DEFAULT_PARAMETERS'] = filepath
+            return
+
+        self.romfs_add('defaults.parm', filepath)
+        self.have_defaults_file = True
+
+    def process_hwdefs(self):
         for fname in self.hwdef:
             self.process_file(fname)
+        self.processed_hwdefs = True
+
+    def run(self):
+        # process input file
+        self.process_hwdefs()
 
         if "MCU" not in self.config:
             self.error("Missing MCU type in config")
@@ -3156,8 +3305,15 @@ Please run: Tools/scripts/build_bootloaders.py %s
         # build a list for peripherals for DMA resolver
         self.periph_list = self.build_peripheral_list()
 
+        # write out a default parameters file, decide how to use it:
+        self.write_default_parameters()
+
         # write out hw.dat for ROMFS
         self.write_all_lines(os.path.join(self.outdir, "hw.dat"))
+
+        # Add ROMFS directories
+        self.romfs_add_dir(['scripts'])
+        self.romfs_add_dir(['param'])
 
         # write out hwdef.h
         self.write_hwdef_header(os.path.join(self.outdir, "hwdef.h"))
@@ -3165,17 +3321,11 @@ Please run: Tools/scripts/build_bootloaders.py %s
         # write out ldscript.ld
         self.write_ldscript(os.path.join(self.outdir, "ldscript.ld"))
 
-        self.romfs_add_dir(['scripts'])
-        self.romfs_add_dir(['param'])
-
         self.write_ROMFS(self.outdir)
 
         # copy the shared linker script into the build directory; it must
         # exist in the same directory as the ldscript.ld file we generate.
         self.copy_common_linkerscript(self.outdir)
-
-        if not self.is_bootloader_fw():
-            self.write_processed_defaults_file(os.path.join(self.outdir, "processed_defaults.parm"))
 
         self.write_env_py(os.path.join(self.outdir, "env.py"))
 

@@ -379,10 +379,10 @@ def do_build(opts, frame_options):
         cmd_configure.append("--enable-math-check-indexes")
 
     if opts.enable_ekf2:
-        cmd_configure.append("--enable-ekf2")
+        cmd_configure.append("--enable-EKF2")
 
     if opts.disable_ekf3:
-        cmd_configure.append("--disable-ekf3")
+        cmd_configure.append("--disable-EKF3")
 
     if opts.postype_single:
         cmd_configure.append("--postype-single")
@@ -415,7 +415,7 @@ def do_build(opts, frame_options):
         cmd_configure.append("--disable-networking")
 
     if opts.enable_ppp:
-        cmd_configure.append("--enable-ppp")
+        cmd_configure.append("--enable-PPP")
 
     if opts.enable_networking_tests:
         cmd_configure.append("--enable-networking-tests")
@@ -672,8 +672,8 @@ def start_antenna_tracker(opts):
 def start_CAN_Periph(opts, frame_info):
     """Compile and run the sitl_periph"""
 
-    progress("Preparing sitl_periph_gps")
-    options = vinfo.options["sitl_periph_gps"]['frames']['gps']
+    progress("Preparing sitl_periph_universal")
+    options = vinfo.options["sitl_periph_universal"]['frames']['universal']
     defaults_path = frame_info.get('periph_params_filename', None)
     if defaults_path is None:
         defaults_path = options.get('default_params_filename', None)
@@ -686,9 +686,9 @@ def start_CAN_Periph(opts, frame_info):
 
     if not cmd_opts.no_rebuild:
         do_build(opts, options)
-    exe = os.path.join(root_dir, 'build/sitl_periph_gps', 'bin/AP_Periph')
+    exe = os.path.join(root_dir, 'build/sitl_periph_universal', 'bin/AP_Periph')
     cmd = ["nice"]
-    cmd_name = "sitl_periph_gps"
+    cmd_name = "sitl_periph_universal"
     if opts.valgrind:
         cmd_name += " (valgrind)"
         cmd.append("valgrind")
@@ -775,6 +775,8 @@ def start_vehicle(binary, opts, stuff, spawns=None):
         cmd.extend(["--sysid", str(opts.sysid)])
     if opts.slave is not None:
         cmd.extend(["--slave", str(opts.slave)])
+    if opts.enable_fgview:
+        cmd.extend(["--enable-fgview"])
     if opts.sitl_instance_args:
         # this could be a lot better:
         cmd.extend(opts.sitl_instance_args.split(" "))
@@ -1340,6 +1342,8 @@ group_sim.add_option("--enable-ppp", action='store_true',
                      help="Enable PPP networking")
 group_sim.add_option("--enable-networking-tests", action='store_true',
                      help="Enable networking tests")
+group_sim.add_option("--enable-fgview", action='store_true',
+                     help="Enable FlightGear output")
 
 parser.add_option_group(group_sim)
 

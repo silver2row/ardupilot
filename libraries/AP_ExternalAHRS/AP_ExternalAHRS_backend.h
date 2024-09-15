@@ -48,6 +48,9 @@ public:
     // This can also copy interim state protected by locking.
     virtual void update() = 0;
 
+    // Return the number of GPS sensors sharing data to AP_GPS.
+    virtual uint8_t num_gps_sensors(void) const = 0;
+
 protected:
     AP_ExternalAHRS::state_t &state;
     uint16_t get_rate(void) const;
@@ -57,7 +60,19 @@ protected:
     void set_default_sensors(uint16_t sensors) {
         frontend.set_default_sensors(sensors);
     }
-    
+
+    /*
+      return true if the GNSS is disabled
+     */
+    bool gnss_is_disabled(void) const {
+        return frontend.gnss_is_disabled;
+    }
+
+    /*
+      return true when we are in fixed wing flight
+     */
+    bool in_fly_forward(void) const;
+
 private:
     AP_ExternalAHRS &frontend;
 };

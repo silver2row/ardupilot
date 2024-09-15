@@ -12,6 +12,7 @@
 #include "AP_Relay.h"
 
 #include <AP_HAL/AP_HAL.h>
+#include <AP_Math/AP_Math.h>
 #include <GCS_MAVLink/GCS.h>
 #include <AP_Logger/AP_Logger.h>
 
@@ -27,6 +28,10 @@
 #if AP_RELAY_DRONECAN_ENABLED
 #include <AP_DroneCAN/AP_DroneCAN.h>
 #include <AP_CANManager/AP_CANManager.h>
+#endif
+
+#if AP_SIM_ENABLED
+#include <SITL/SITL.h>
 #endif
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
@@ -202,29 +207,30 @@ void AP_Relay::convert_params()
     // Dont need this conversion on periph as relay support is more recent
 
     // Before converting local params we must find any relays being used by index from external libs
-    int8_t relay_index;
-
     int8_t ice_relay = -1;
 #if AP_ICENGINE_ENABLED
     AP_ICEngine *ice = AP::ice();
-    if (ice != nullptr && ice->get_legacy_ignition_relay_index(relay_index)) {
-        ice_relay = relay_index;
+    int8_t ice_relay_index;
+    if (ice != nullptr && ice->get_legacy_ignition_relay_index(ice_relay_index)) {
+        ice_relay = ice_relay_index;
     }
 #endif
 
     int8_t chute_relay = -1;
 #if HAL_PARACHUTE_ENABLED
     AP_Parachute *parachute = AP::parachute();
-    if (parachute != nullptr && parachute->get_legacy_relay_index(relay_index)) {
-        chute_relay = relay_index;
+    int8_t parachute_relay_index;
+    if (parachute != nullptr && parachute->get_legacy_relay_index(parachute_relay_index)) {
+        chute_relay = parachute_relay_index;
     }
 #endif
 
     int8_t cam_relay = -1;
 #if AP_CAMERA_ENABLED
     AP_Camera *camera = AP::camera();
-    if ((camera != nullptr) && (camera->get_legacy_relay_index(relay_index))) {
-        cam_relay = relay_index;
+    int8_t camera_relay_index;
+    if ((camera != nullptr) && (camera->get_legacy_relay_index(camera_relay_index))) {
+        cam_relay = camera_relay_index;
     }
 #endif
 
@@ -402,6 +408,10 @@ void AP_Relay::set_pin_by_instance(uint8_t instance, bool value)
 
     const bool initial_value = get_pin(pin);
 
+    if (_params[instance].inverted > 0) {
+        value = !value;
+    }
+
     if (initial_value != value) {
         set_pin(pin, value);
 #if HAL_LOGGING_ENABLED
@@ -467,6 +477,18 @@ bool AP_Relay::arming_checks(size_t buflen, char *buffer) const
             }
             return false;
         }
+
+        // Each pin can only be used by a single relay
+        for (uint8_t j=i+1; j<ARRAY_SIZE(_params); j++) {
+            if (!function_valid((AP_Relay_Params::FUNCTION)_params[j].function.get())) {
+                // Relay disabled
+                continue;
+            }
+            if (pin == _params[j].pin.get()) {
+                hal.util->snprintf(buffer, buflen, "pin conflict RELAY%u_PIN = RELAY%u_PIN", int(i+1), int(j+1));
+                return false;
+            }
+        }
     }
     return true;
 }
@@ -476,6 +498,10 @@ bool AP_Relay::get(uint8_t instance) const
     if (instance >= ARRAY_SIZE(_params)) {
         // invalid instance
         return false;
+    }
+
+    if (_params[instance].inverted > 0) {
+        return !get_pin(_params[instance].pin.get());
     }
 
     return get_pin(_params[instance].pin.get());
@@ -640,7 +666,7 @@ bool AP_Relay::send_relay_status(const GCS_MAVLINK &link) const
     uint16_t present_mask = 0;
     uint16_t on_mask = 0;
     for (uint8_t i=0; i<ARRAY_SIZE(_params); i++) {
-        if (!enabled(i)) {
+        if (!function_valid(_params[i].function)) {
             continue;
         }
         const uint16_t relay_bit_mask = 1U << i;

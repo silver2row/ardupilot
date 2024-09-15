@@ -152,6 +152,10 @@ void AP_RCProtocol_GHST::_process_byte(uint32_t timestamp_us, uint8_t byte)
         return;
     }
 
+    if (_frame.device_address != DeviceAddress::GHST_ADDRESS_FLIGHT_CONTROLLER) {
+        return;
+    }
+
     // parse the length
     if (_frame_ofs == GHST_HEADER_TYPE_LEN) {
         _frame_crc = crc8_dvb_s2(0, _frame.type);
@@ -173,6 +177,12 @@ void AP_RCProtocol_GHST::_process_byte(uint32_t timestamp_us, uint8_t byte)
         return;
     }
 
+    if (_frame.length < 2) {
+        // invalid length, we subtract 2 below
+        _frame_ofs = 0;
+        return;
+    }
+    
     // decode whatever we got and expect
     if (_frame_ofs == _frame.length + GHST_HEADER_LEN) {
         log_data(AP_RCProtocol::GHST, timestamp_us, (const uint8_t*)&_frame, _frame_ofs - GHST_HEADER_LEN);
@@ -270,6 +280,7 @@ bool AP_RCProtocol_GHST::decode_ghost_packet()
     const RadioFrame* radio_frame = (const RadioFrame*)(&_frame.payload);
     const Channels12Bit_4Chan* channels = &(radio_frame->channels);
     const uint8_t* lowres_channels = radio_frame->lowres_channels;
+    bool rc_frame = false;
 
     // Scaling from Betaflight
     // Scaling 12bit channels (8bit channels in brackets)
@@ -318,6 +329,7 @@ bool AP_RCProtocol_GHST::decode_ghost_packet()
             _channels[offset++] = CHANNEL_LR_SCALE_LEGACY(lowres_channels[1]);
             _channels[offset++] = CHANNEL_LR_SCALE_LEGACY(lowres_channels[2]);
             _channels[offset++] = CHANNEL_LR_SCALE_LEGACY(lowres_channels[3]);
+            rc_frame = true;
             break;
         }
         case GHST_UL_RC_CHANS_HS4_12_5TO8:
@@ -328,6 +340,7 @@ bool AP_RCProtocol_GHST::decode_ghost_packet()
             _channels[offset++] = CHANNEL_LR_SCALE(lowres_channels[1]);
             _channels[offset++] = CHANNEL_LR_SCALE(lowres_channels[2]);
             _channels[offset++] = CHANNEL_LR_SCALE(lowres_channels[3]);
+            rc_frame = true;
             break;
         }
         case GHST_UL_RC_CHANS_RSSI:
@@ -345,7 +358,7 @@ bool AP_RCProtocol_GHST::decode_ghost_packet()
     }
 #endif
 
-    return true;
+    return rc_frame;
 }
 
 // send out telemetry
@@ -358,7 +371,7 @@ bool AP_RCProtocol_GHST::process_telemetry(bool check_constraint)
     }
 
     if (!telem_available) {
-#if AP_GHST_TELEM_ENABLED && !APM_BUILD_TYPE(APM_BUILD_iofirmware)
+#if AP_GHST_TELEM_ENABLED
         if (AP_GHST_Telem::get_telem_data(&_telemetry_frame, is_tx_active())) {
             telem_available = true;
         } else {
@@ -421,19 +434,25 @@ void AP_RCProtocol_GHST::process_byte(uint8_t byte, uint32_t baudrate)
     _process_byte(AP_HAL::micros(), byte);
 }
 
-// change the bootstrap baud rate to ELRS standard if configured
+// change the bootstrap baud rate to Ghost standard if configured
 void AP_RCProtocol_GHST::process_handshake(uint32_t baudrate)
 {
     AP_HAL::UARTDriver *uart = get_current_UART();
 
-    // only change the baudrate if we are bootstrapping CRSF
+    // only change the baudrate if we are specifically bootstrapping Ghost
     if (uart == nullptr
         || baudrate != CRSF_BAUDRATE
         || baudrate == GHST_BAUDRATE
         || uart->get_baud_rate() == GHST_BAUDRATE
-        || (get_rc_protocols_mask() & ((1U<<(uint8_t(AP_RCProtocol::GHST)+1))+1)) == 0) {
+        || !protocol_enabled(AP_RCProtocol::GHST)) {
         return;
     }
+#if AP_RCPROTOCOL_CRSF_ENABLED
+    if (protocol_enabled(AP_RCProtocol::CRSF)) {
+        // don't fight CRSF
+        return;
+    }
+#endif
 
     uart->begin(GHST_BAUDRATE);
 }

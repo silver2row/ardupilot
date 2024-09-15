@@ -25,17 +25,17 @@ void Rover::fence_check()
                 case FailsafeAction::None:
                     break;
                 case FailsafeAction::SmartRTL:
-                    if (set_mode(mode_smartrtl, ModeReason::BATTERY_FAILSAFE)) {
+                    if (set_mode(mode_smartrtl, ModeReason::FENCE_BREACHED)) {
                         break;
                     }
                     FALLTHROUGH;
                 case FailsafeAction::RTL:
-                    if (set_mode(mode_rtl, ModeReason::BATTERY_FAILSAFE)) {
+                    if (set_mode(mode_rtl, ModeReason::FENCE_BREACHED)) {
                         break;
                     }
                     FALLTHROUGH;
                 case FailsafeAction::Hold:
-                    set_mode(mode_hold, ModeReason::BATTERY_FAILSAFE);
+                    set_mode(mode_hold, ModeReason::FENCE_BREACHED);
                     break;
                 case FailsafeAction::SmartRTL_Hold:
                     if (!set_mode(mode_smartrtl, ModeReason::FENCE_BREACHED)) {
@@ -51,11 +51,11 @@ void Rover::fence_check()
                 set_mode(mode_hold, ModeReason::FENCE_BREACHED);
             }
         }
-        AP::logger().Write_Error(LogErrorSubsystem::FAILSAFE_FENCE, LogErrorCode(new_breaches));
+        LOGGER_WRITE_ERROR(LogErrorSubsystem::FAILSAFE_FENCE, LogErrorCode(new_breaches));
 
     } else if (orig_breaches) {
         // record clearing of breach
-        AP::logger().Write_Error(LogErrorSubsystem::FAILSAFE_FENCE,
+        LOGGER_WRITE_ERROR(LogErrorSubsystem::FAILSAFE_FENCE,
                                  LogErrorCode::ERROR_RESOLVED);
     }
 #endif // AP_FENCE_ENABLED

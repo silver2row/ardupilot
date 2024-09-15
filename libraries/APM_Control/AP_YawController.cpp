@@ -206,7 +206,7 @@ int32_t AP_YawController::get_servo_out(float scaler, bool disable_integrator)
     // Calculate yaw rate required to keep up with a constant height coordinated turn
     float aspeed;
     float rate_offset;
-    float bank_angle = AP::ahrs().roll;
+    float bank_angle = AP::ahrs().get_roll();
     // limit bank angle between +- 80 deg if right way up
     if (fabsf(bank_angle) < 1.5707964f)	{
         bank_angle = constrain_float(bank_angle,-1.3962634f,1.3962634f);
@@ -391,7 +391,7 @@ void AP_YawController::autotune_start(void)
         gains.tau.set(0.5);
         gains.rmax_pos.set(90);
 
-        autotune = new AP_AutoTune(gains, AP_AutoTune::AUTOTUNE_YAW, aparm, rate_pid);
+        autotune = NEW_NOTHROW AP_AutoTune(gains, AP_AutoTune::AUTOTUNE_YAW, aparm, rate_pid);
         if (autotune == nullptr) {
             if (!failed_autotune_alloc) {
                 GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "AutoTune: failed yaw allocation");

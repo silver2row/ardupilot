@@ -30,7 +30,6 @@ on:
       - 'Tools/Hello/**'
       - 'Tools/IO_Firmware/**'
       - 'Tools/Linux_HAL_Essentials/**'
-      - 'Tools/LogAnalyzer/**'
       - 'Tools/Pozyx/**'
       - 'Tools/PrintVersion.py'
       - 'Tools/Replay/**'
@@ -201,7 +200,7 @@ jobs:
             export CXX=clang++
           fi
           PATH="/github/home/.local/bin:$PATH"
-          ./waf configure --board sitl
+          ./waf configure --board sitl --debug
           ./waf build --target bin/antennatracker
           ccache -s
           ccache -z

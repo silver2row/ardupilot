@@ -25,6 +25,7 @@
 
 #include <AP_HAL/Semaphores.h>
 
+#include "AP_AHRS_Backend.h"
 #include <AP_NavEKF2/AP_NavEKF2.h>
 #include <AP_NavEKF3/AP_NavEKF3.h>
 #include <AP_NavEKF/AP_Nav_Common.h>              // definitions shared by inertial and ekf nav filters
@@ -130,6 +131,12 @@ public:
 #endif
     }
 
+#if AP_AHRS_EXTERNAL_WIND_ESTIMATE_ENABLED
+    void set_external_wind_estimate(float speed, float direction) {
+        dcm.set_external_wind_estimate(speed, direction);
+    }
+#endif
+
     // return the parameter AHRS_WIND_MAX in metres per second
     uint8_t get_max_wind() const {
         return _wind_max;
@@ -140,10 +147,11 @@ public:
      */
 
     // get apparent to true airspeed ratio
-    float get_EAS2TAS(void) const {
-        return state.EAS2TAS;
-    }
+    float get_EAS2TAS(void) const;
 
+    // get air density / sea level density - decreases as altitude climbs
+    float get_air_density_ratio(void) const;
+    
     // return an airspeed estimate if available. return true
     // if we have an estimate
     bool airspeed_estimate(float &airspeed_ret) const;
@@ -275,8 +283,8 @@ public:
 
     // return location corresponding to vector relative to the
     // vehicle's origin
-    bool get_location_from_origin_offset(Location &loc, const Vector3p &offset_ned) const WARN_IF_UNUSED;
-    bool get_location_from_home_offset(Location &loc, const Vector3p &offset_ned) const WARN_IF_UNUSED;
+    bool get_location_from_origin_offset_NED(Location &loc, const Vector3p &offset_ned) const WARN_IF_UNUSED;
+    bool get_location_from_home_offset_NED(Location &loc, const Vector3p &offset_ned) const WARN_IF_UNUSED;
 
     // Get a derivative of the vertical position in m/s which is kinematically consistent with the vertical position is required by some control loops.
     // This is different to the vertical velocity from the EKF which is not always consistent with the vertical position due to the various errors that are being corrected for.
@@ -409,7 +417,7 @@ public:
     void request_yaw_reset(void);
 
     // set position, velocity and yaw sources to either 0=primary, 1=secondary, 2=tertiary
-    void set_posvelyaw_source_set(uint8_t source_set_idx);
+    void set_posvelyaw_source_set(AP_NavEKF_Source::SourceSetSelection source_set_idx);
 
     //returns index of active source set used, 0=primary, 1=secondary, 2=tertiary
     uint8_t get_posvelyaw_source_set() const;
@@ -443,7 +451,7 @@ public:
 #if AP_AHRS_SIM_ENABLED
         SIM = 10,
 #endif
-#if HAL_EXTERNAL_AHRS_ENABLED
+#if AP_AHRS_EXTERNAL_ENABLED
         EXTERNAL = 11,
 #endif
     };
@@ -548,10 +556,6 @@ public:
      */
 
     // roll/pitch/yaw euler angles, all in radians
-    float roll;
-    float pitch;
-    float yaw;
-
     float get_roll() const { return roll; }
     float get_pitch() const { return pitch; }
     float get_yaw() const { return yaw; }
@@ -681,6 +685,11 @@ public:
 
 private:
 
+    // roll/pitch/yaw euler angles, all in radians
+    float roll;
+    float pitch;
+    float yaw;
+
     // optional view class
     AP_AHRS_View *_view;
 
@@ -799,7 +808,7 @@ private:
     void update_SITL(void);
 #endif
 
-#if HAL_EXTERNAL_AHRS_ENABLED
+#if AP_AHRS_EXTERNAL_ENABLED
     void update_external(void);
 #endif    
 
@@ -1001,7 +1010,7 @@ private:
     struct AP_AHRS_Backend::Estimates sim_estimates;
 #endif
 
-#if HAL_EXTERNAL_AHRS_ENABLED
+#if AP_AHRS_EXTERNAL_ENABLED
     AP_AHRS_External external;
     struct AP_AHRS_Backend::Estimates external_estimates;
 #endif
@@ -1015,6 +1024,9 @@ private:
     bool option_set(Options option) const {
         return (_options & uint16_t(option)) != 0;
     }
+
+    // true when we have completed the common origin setup
+    bool done_common_origin;
 };
 
 namespace AP {

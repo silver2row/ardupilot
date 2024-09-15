@@ -14,6 +14,7 @@
 #include "AP_OpticalFlow_UPFLOW.h"
 #include <AP_Logger/AP_Logger.h>
 #include <GCS_MAVLink/GCS.h>
+#include <AP_AHRS/AP_AHRS.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -139,8 +140,8 @@ void AP_OpticalFlow::init(uint32_t log_bit)
 #endif
         break;
     case Type::BEBOP:
-#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BEBOP
-        backend = new AP_OpticalFlow_Onboard(*this);
+#if AP_OPTICALFLOW_ONBOARD_ENABLED
+        backend = NEW_NOTHROW AP_OpticalFlow_Onboard(*this);
 #endif
         break;
     case Type::CXOF:
@@ -155,7 +156,7 @@ void AP_OpticalFlow::init(uint32_t log_bit)
         break;
     case Type::UAVCAN:
 #if AP_OPTICALFLOW_HEREFLOW_ENABLED
-        backend = new AP_OpticalFlow_HereFlow(*this);
+        backend = NEW_NOTHROW AP_OpticalFlow_HereFlow(*this);
 #endif
         break;
     case Type::MSP:
@@ -170,7 +171,7 @@ void AP_OpticalFlow::init(uint32_t log_bit)
         break;
     case Type::SITL:
 #if AP_OPTICALFLOW_SITL_ENABLED
-        backend = new AP_OpticalFlow_SITL(*this);
+        backend = NEW_NOTHROW AP_OpticalFlow_SITL(*this);
 #endif
         break;
     }
@@ -242,7 +243,7 @@ void AP_OpticalFlow::handle_msp(const MSP::msp_opflow_data_message_t &pkt)
 void AP_OpticalFlow::start_calibration()
 {
     if (_calibrator == nullptr) {
-        _calibrator = new AP_OpticalFlow_Calibrator();
+        _calibrator = NEW_NOTHROW AP_OpticalFlow_Calibrator();
         if (_calibrator == nullptr) {
             GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "FlowCal: failed to start");
             return;

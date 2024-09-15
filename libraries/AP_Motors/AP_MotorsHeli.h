@@ -42,7 +42,7 @@ public:
     /// Constructor
     AP_MotorsHeli( uint16_t speed_hz = AP_MOTORS_HELI_SPEED_DEFAULT) :
         AP_Motors(speed_hz),
-        _main_rotor(SRV_Channel::k_heli_rsc, AP_MOTORS_HELI_RSC)
+        _main_rotor(SRV_Channel::k_heli_rsc, AP_MOTORS_HELI_RSC, 0U)
     {
         AP_Param::setup_object_defaults(this, var_info);
     };
@@ -75,9 +75,6 @@ public:
     // set_collective_for_landing - limits collective from going too low if we know we are landed
     void set_collective_for_landing(bool landing) { _heliflags.landing_collective = landing; }
 
-    // set_inverted_flight - enables/disables inverted flight
-    void set_inverted_flight(bool inverted) { _heliflags.inverted_flight = inverted; }
-
     // get_rsc_mode - gets the current rotor speed control method
     uint8_t get_rsc_mode() const { return _main_rotor.get_control_mode(); }
 
@@ -93,17 +90,8 @@ public:
     // get_desired_rotor_speed - gets target rotor speed as a number from 0 ~ 1
     float get_desired_rotor_speed() const { return _main_rotor.get_desired_speed(); }
 
-    // get_main_rotor_speed - estimated rotor speed when no governor or speed sensor used
-    float get_main_rotor_speed() const { return _main_rotor.get_rotor_speed(); }
-
     // return true if the main rotor is up to speed
     bool rotor_runup_complete() const { return _heliflags.rotor_runup_complete; }
-
-    //get rotor governor output
-    float get_governor_output() const { return _main_rotor.get_governor_output(); }
-
-    //get engine throttle output
-    float get_control_output() const { return _main_rotor.get_control_output(); }
 
     // get_motor_mask - returns a bitmask of which outputs are being used for motors or servos (1 means being used)
     //  this can be used to ensure other pwm outputs (i.e. for servos) do not conflict
@@ -135,6 +123,9 @@ public:
 
     // set_in_autorotation - allows main code to set when aircraft is in autorotation.
     void set_in_autorotation(bool autorotation) { _heliflags.in_autorotation = autorotation; }
+
+    // get_in_autorotation - allows main code to determine when aircraft is in autorotation.
+    bool get_in_autorotation() { return _heliflags.in_autorotation; }
 
     // set_enable_bailout - allows main code to set when RSC can immediately ramp engine instantly
     void set_enable_bailout(bool bailout) { _heliflags.enable_bailout = bailout; }
@@ -182,7 +173,6 @@ protected:
 
     // output - sends commands to the motors
     void output_armed_stabilizing() override;
-    void output_armed_zero_throttle();
     void output_disarmed();
 
     // external objects we depend upon
@@ -237,6 +227,14 @@ protected:
     // update turbine start flag
     void update_turbine_start();
 
+    // Update _heliflags.rotor_runup_complete value writing log event on state change
+    void set_rotor_runup_complete(bool new_value);
+
+#if HAL_LOGGING_ENABLED
+    // Returns the scaling value required to convert the collective angle parameters into the cyclic-output-to-angle conversion for blade angle logging
+    float get_cyclic_angle_scaler(void) const;
+#endif
+
     // enum values for HOVER_LEARN parameter
     enum HoverLearn {
         HOVER_LEARN_DISABLED = 0,
@@ -248,7 +246,6 @@ protected:
     struct heliflags_type {
         uint8_t landing_collective      : 1;    // true if collective is setup for landing which has much higher minimum
         uint8_t rotor_runup_complete    : 1;    // true if the rotors have had enough time to wind up
-        uint8_t inverted_flight         : 1;    // true for inverted flight
         uint8_t init_targets_on_arming  : 1;    // 0 if targets were initialized, 1 if targets were not initialized after arming
         uint8_t save_rsc_mode           : 1;    // used to determine the rsc mode needs to be saved while disarmed
         uint8_t in_autorotation         : 1;    // true if aircraft is in autorotation

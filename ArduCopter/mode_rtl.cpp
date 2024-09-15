@@ -1,6 +1,6 @@
 #include "Copter.h"
 
-#if MODE_RTL_ENABLED == ENABLED
+#if MODE_RTL_ENABLED
 
 /*
  * Init and run calls for RTL flight mode
@@ -39,7 +39,9 @@ bool ModeRTL::init(bool ignore_checks)
 // re-start RTL with terrain following disabled
 void ModeRTL::restart_without_terrain()
 {
-    AP::logger().Write_Error(LogErrorSubsystem::NAVIGATION, LogErrorCode::RESTARTED_RTL);
+#if HAL_LOGGING_ENABLED
+    LOGGER_WRITE_ERROR(LogErrorSubsystem::NAVIGATION, LogErrorCode::RESTARTED_RTL);
+#endif
     terrain_following_allowed = false;
     _state = SubMode::STARTING;
     _state_complete = true;
@@ -50,11 +52,11 @@ ModeRTL::RTLAltType ModeRTL::get_alt_type() const
 {
     // sanity check parameter
     switch ((ModeRTL::RTLAltType)g.rtl_alt_type) {
-    case RTLAltType::RTL_ALTTYPE_RELATIVE ... RTLAltType::RTL_ALTTYPE_TERRAIN:
+    case RTLAltType::RELATIVE ... RTLAltType::TERRAIN:
         return g.rtl_alt_type;
     }
     // user has an invalid value
-    return RTLAltType::RTL_ALTTYPE_RELATIVE;
+    return RTLAltType::RELATIVE;
 }
 
 // rtl_run - runs the return-to-launch controller
@@ -134,7 +136,7 @@ void ModeRTL::climb_start()
     if (!wp_nav->set_wp_destination_loc(rtl_path.climb_target) || !wp_nav->set_wp_destination_next_loc(rtl_path.return_target)) {
         // this should not happen because rtl_build_path will have checked terrain data was available
         gcs().send_text(MAV_SEVERITY_CRITICAL,"RTL: unexpected error setting climb target");
-        AP::logger().Write_Error(LogErrorSubsystem::NAVIGATION, LogErrorCode::FAILED_TO_SET_DESTINATION);
+        LOGGER_WRITE_ERROR(LogErrorSubsystem::NAVIGATION, LogErrorCode::FAILED_TO_SET_DESTINATION);
         copter.set_mode(Mode::Number::LAND, ModeReason::TERRAIN_FAILSAFE);
         return;
     }
@@ -253,11 +255,6 @@ void ModeRTL::descent_start()
     // optionally deploy landing gear
     copter.landinggear.deploy_for_landing();
 #endif
-
-#if AP_FENCE_ENABLED
-    // disable the fence on landing
-    copter.fence.auto_disable_fence_for_landing();
-#endif
 }
 
 // rtl_descent_run - implements the final descent to the RTL_ALT
@@ -275,7 +272,7 @@ void ModeRTL::descent_run()
     // process pilot's input
     if (!copter.failsafe.radio) {
         if ((g.throttle_behavior & THR_BEHAVE_HIGH_THROTTLE_CANCELS_LAND) != 0 && copter.rc_throttle_control_in_filter.get() > LAND_CANCEL_TRIGGER_THR){
-            AP::logger().Write_Event(LogEvent::LAND_CANCELLED_BY_PILOT);
+            LOGGER_WRITE_EVENT(LogEvent::LAND_CANCELLED_BY_PILOT);
             // exit land if throttle is high
             if (!copter.set_mode(Mode::Number::LOITER, ModeReason::THROTTLE_LAND_ESCAPE)) {
                 copter.set_mode(Mode::Number::ALT_HOLD, ModeReason::THROTTLE_LAND_ESCAPE);
@@ -292,7 +289,7 @@ void ModeRTL::descent_run()
             // record if pilot has overridden roll or pitch
             if (!vel_correction.is_zero()) {
                 if (!copter.ap.land_repo_active) {
-                    AP::logger().Write_Event(LogEvent::LAND_REPO_ACTIVE);
+                    LOGGER_WRITE_EVENT(LogEvent::LAND_REPO_ACTIVE);
                 }
                 copter.ap.land_repo_active = true;
             }
@@ -345,11 +342,6 @@ void ModeRTL::land_start()
     // optionally deploy landing gear
     copter.landinggear.deploy_for_landing();
 #endif
-
-#if AP_FENCE_ENABLED
-    // disable the fence on landing
-    copter.fence.auto_disable_fence_for_landing();
-#endif
 }
 
 bool ModeRTL::is_landing() const
@@ -385,10 +377,7 @@ void ModeRTL::land_run(bool disarm_on_land)
 void ModeRTL::build_path()
 {
     // origin point is our stopping point
-    Vector3p stopping_point;
-    pos_control->get_stopping_point_xy_cm(stopping_point.xy());
-    pos_control->get_stopping_point_z_cm(stopping_point.z);
-    rtl_path.origin_point = Location(stopping_point.tofloat(), Location::AltFrame::ABOVE_ORIGIN);
+    rtl_path.origin_point = get_stopping_point();
     rtl_path.origin_point.change_alt_frame(Location::AltFrame::ABOVE_HOME);
 
     // compute return target
@@ -421,12 +410,12 @@ void ModeRTL::compute_return_target()
 
     // determine altitude type of return journey (alt-above-home, alt-above-terrain using range finder or alt-above-terrain using terrain database)
     ReturnTargetAltType alt_type = ReturnTargetAltType::RELATIVE;
-    if (terrain_following_allowed && (get_alt_type() == RTLAltType::RTL_ALTTYPE_TERRAIN)) {
+    if (terrain_following_allowed && (get_alt_type() == RTLAltType::TERRAIN)) {
         // convert RTL_ALT_TYPE and WPNAV_RFNG_USE parameters to ReturnTargetAltType
         switch (wp_nav->get_terrain_source()) {
         case AC_WPNav::TerrainSource::TERRAIN_UNAVAILABLE:
             alt_type = ReturnTargetAltType::RELATIVE;
-            AP::logger().Write_Error(LogErrorSubsystem::NAVIGATION, LogErrorCode::RTL_MISSING_RNGFND);
+            LOGGER_WRITE_ERROR(LogErrorSubsystem::NAVIGATION, LogErrorCode::RTL_MISSING_RNGFND);
             gcs().send_text(MAV_SEVERITY_CRITICAL, "RTL: no terrain data, using alt-above-home");
             break;
         case AC_WPNav::TerrainSource::TERRAIN_FROM_RANGEFINDER:
@@ -447,7 +436,7 @@ void ModeRTL::compute_return_target()
             // fallback to relative alt and warn user
             alt_type = ReturnTargetAltType::RELATIVE;
             gcs().send_text(MAV_SEVERITY_CRITICAL, "RTL: rangefinder unhealthy, using alt-above-home");
-            AP::logger().Write_Error(LogErrorSubsystem::NAVIGATION, LogErrorCode::RTL_MISSING_RNGFND);
+            LOGGER_WRITE_ERROR(LogErrorSubsystem::NAVIGATION, LogErrorCode::RTL_MISSING_RNGFND);
         }
     }
 
@@ -463,7 +452,7 @@ void ModeRTL::compute_return_target()
         } else {
             // fallback to relative alt and warn user
             alt_type = ReturnTargetAltType::RELATIVE;
-            AP::logger().Write_Error(LogErrorSubsystem::TERRAIN, LogErrorCode::MISSING_TERRAIN_DATA);
+            LOGGER_WRITE_ERROR(LogErrorSubsystem::TERRAIN, LogErrorCode::MISSING_TERRAIN_DATA);
             gcs().send_text(MAV_SEVERITY_CRITICAL, "RTL: no terrain data, using alt-above-home");
         }
     }

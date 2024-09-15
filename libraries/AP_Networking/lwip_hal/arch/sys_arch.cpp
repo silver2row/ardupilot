@@ -10,6 +10,10 @@
 #include <AP_HAL/Semaphores.h>
 #include <AP_Math/AP_Math.h>
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
+#include <AP_HAL_ChibiOS/hwdef/common/stm32_util.h>
+#endif
+
 #include <string.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -63,8 +67,12 @@ public:
         arg(_arg)
         {}
     bool create(const char *name, int stacksize, int prio) {
+#ifdef HAL_BOOTLOADER_BUILD
+        return thread_create_alloc(MAX(stacksize,2048), name, 60, function, arg);
+#else
         return hal.scheduler->thread_create(
             FUNCTOR_BIND_MEMBER(&ThreadWrapper::run, void), name, MAX(stacksize,2048), AP_HAL::Scheduler::PRIORITY_NET, prio);
+#endif
     }
 private:
     void run(void) {
@@ -77,7 +85,7 @@ private:
 sys_thread_t
 sys_thread_new(const char *name, lwip_thread_fn function, void *arg, int stacksize, int prio)
 {
-    auto *thread_data = new ThreadWrapper(function, arg);
+    auto *thread_data = NEW_NOTHROW ThreadWrapper(function, arg);
     if (!thread_data->create(name, stacksize, prio)) {
         AP_HAL::panic("lwip: Failed to start thread %s", name);
     }
@@ -112,7 +120,7 @@ sys_mbox_new(struct sys_mbox **mb, int size)
     struct sys_mbox *mbox;
     LWIP_UNUSED_ARG(size);
 
-    mbox = new sys_mbox;
+    mbox = NEW_NOTHROW sys_mbox;
     if (mbox == NULL) {
         return ERR_MEM;
     }
@@ -284,7 +292,7 @@ sys_arch_mbox_fetch(struct sys_mbox **mb, void **msg, u32_t timeout_ms)
 err_t
 sys_sem_new(sys_sem_t *sem, u8_t count)
 {
-    *sem = (sys_sem_t)new HAL_BinarySemaphore(count);
+    *sem = (sys_sem_t)NEW_NOTHROW HAL_BinarySemaphore(count);
     if (*sem == NULL) {
         return ERR_MEM;
     }
@@ -322,7 +330,7 @@ sys_sem_free(sys_sem_t *sem)
 err_t
 sys_mutex_new(sys_mutex_t *mutex)
 {
-    *mutex = (sys_mutex_t)new HAL_Semaphore;
+    *mutex = (sys_mutex_t)NEW_NOTHROW HAL_Semaphore;
     if (*mutex == nullptr) {
         return ERR_MEM;
     }
@@ -373,9 +381,7 @@ sys_init(void)
 sys_prot_t
 sys_arch_protect(void)
 {
-    if (hal.scheduler != nullptr) {
-        lwprot_mutex.take_blocking();
-    }
+    lwprot_mutex.take_blocking();
     return 0;
 }
 
@@ -383,9 +389,7 @@ void
 sys_arch_unprotect(sys_prot_t pval)
 {
     LWIP_UNUSED_ARG(pval);
-    if (hal.scheduler != nullptr) {
-        lwprot_mutex.give();
-    }
+    lwprot_mutex.give();
 }
 
 #endif // AP_NETWORKING_NEED_LWIP

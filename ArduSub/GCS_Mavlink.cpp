@@ -63,6 +63,9 @@ MAV_STATE GCS_MAVLINK_Sub::vehicle_system_status() const
     if (sub.motors.armed()) {
         return MAV_STATE_ACTIVE;
     }
+    if (!sub.ap.initialised) {
+    	return MAV_STATE_BOOT;
+    }
 
     return MAV_STATE_STANDBY;
 }
@@ -91,6 +94,11 @@ void GCS_MAVLINK_Sub::send_nav_controller_output() const
 int16_t GCS_MAVLINK_Sub::vfr_hud_throttle() const
 {
     return (int16_t)(sub.motors.get_throttle() * 100);
+}
+
+float GCS_MAVLINK_Sub::vfr_hud_alt() const
+{
+    return sub.get_alt_msl();
 }
 
 // Work around to get temperature sensor data out
@@ -143,6 +151,9 @@ bool GCS_MAVLINK_Sub::send_info()
 
     CHECK_PAYLOAD_SIZE(NAMED_VALUE_FLOAT);
     send_named_float("RollPitch", sub.roll_pitch_flag);
+
+    CHECK_PAYLOAD_SIZE(NAMED_VALUE_FLOAT);
+    send_named_float("RFTarget", sub.mode_surftrak.get_rangefinder_target_cm() / 100.0f);
 
     return true;
 }
@@ -261,7 +272,7 @@ const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
     // @Increment: 1
     // @RebootRequired: True
     // @User: Advanced
-    AP_GROUPINFO("RAW_SENS", 0, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_RAW_SENSORS],  0),
+    AP_GROUPINFO("RAW_SENS", 0, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_RAW_SENSORS],  2),
 
     // @Param: EXT_STAT
     // @DisplayName: Extended status stream rate to ground station
@@ -271,7 +282,7 @@ const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
     // @Increment: 1
     // @RebootRequired: True
     // @User: Advanced
-    AP_GROUPINFO("EXT_STAT", 1, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_EXTENDED_STATUS],  0),
+    AP_GROUPINFO("EXT_STAT", 1, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_EXTENDED_STATUS],  2),
 
     // @Param: RC_CHAN
     // @DisplayName: RC Channel stream rate to ground station
@@ -281,7 +292,7 @@ const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
     // @Increment: 1
     // @RebootRequired: True
     // @User: Advanced
-    AP_GROUPINFO("RC_CHAN",  2, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_RC_CHANNELS],  0),
+    AP_GROUPINFO("RC_CHAN",  2, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_RC_CHANNELS],  2),
 
     // @Param: POSITION
     // @DisplayName: Position stream rate to ground station
@@ -291,7 +302,7 @@ const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
     // @Increment: 1
     // @RebootRequired: True
     // @User: Advanced
-    AP_GROUPINFO("POSITION", 4, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_POSITION],  0),
+    AP_GROUPINFO("POSITION", 4, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_POSITION],  3),
 
     // @Param: EXTRA1
     // @DisplayName: Extra data type 1 stream rate to ground station
@@ -301,7 +312,7 @@ const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
     // @Increment: 1
     // @RebootRequired: True
     // @User: Advanced
-    AP_GROUPINFO("EXTRA1",   5, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_EXTRA1],  0),
+    AP_GROUPINFO("EXTRA1",   5, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_EXTRA1],  10),
 
     // @Param: EXTRA2
     // @DisplayName: Extra data type 2 stream rate to ground station
@@ -311,7 +322,7 @@ const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
     // @Increment: 1
     // @RebootRequired: True
     // @User: Advanced
-    AP_GROUPINFO("EXTRA2",   6, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_EXTRA2],  0),
+    AP_GROUPINFO("EXTRA2",   6, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_EXTRA2],  10),
 
     // @Param: EXTRA3
     // @DisplayName: Extra data type 3 stream rate to ground station
@@ -321,7 +332,7 @@ const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
     // @Increment: 1
     // @RebootRequired: True
     // @User: Advanced
-    AP_GROUPINFO("EXTRA3",   7, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_EXTRA3],  0),
+    AP_GROUPINFO("EXTRA3",   7, GCS_MAVLINK_Parameters, streamRates[GCS_MAVLINK::STREAM_EXTRA3],  3),
 
     // @Param: PARAMS
     // @DisplayName: Parameter stream rate to ground station
@@ -370,7 +381,9 @@ static const ap_message STREAM_POSITION_msgs[] = {
 static const ap_message STREAM_RC_CHANNELS_msgs[] = {
     MSG_SERVO_OUTPUT_RAW,
     MSG_RC_CHANNELS,
+#if AP_MAVLINK_MSG_RC_CHANNELS_RAW_ENABLED
     MSG_RC_CHANNELS_RAW, // only sent on a mavlink1 connection
+#endif
 };
 static const ap_message STREAM_EXTRA1_msgs[] = {
     MSG_ATTITUDE,
@@ -386,7 +399,9 @@ static const ap_message STREAM_EXTRA2_msgs[] = {
 static const ap_message STREAM_EXTRA3_msgs[] = {
     MSG_AHRS,
     MSG_SYSTEM_TIME,
+#if AP_RANGEFINDER_ENABLED
     MSG_RANGEFINDER,
+#endif
     MSG_DISTANCE_SENSOR,
 #if AP_TERRAIN_AVAILABLE
     MSG_TERRAIN,
@@ -470,11 +485,44 @@ MAV_RESULT GCS_MAVLINK_Sub::handle_command_do_set_roi(const Location &roi_loc)
     return MAV_RESULT_ACCEPTED;
 }
 
-bool GCS_MAVLINK_Sub::set_home_to_current_location(bool _lock) {
-    return sub.set_home_to_current_location(_lock);
-}
-bool GCS_MAVLINK_Sub::set_home(const Location& loc, bool _lock) {
-    return sub.set_home(loc, _lock);
+MAV_RESULT GCS_MAVLINK_Sub::handle_command_int_do_reposition(const mavlink_command_int_t &packet)
+{
+    const bool change_modes = ((int32_t)packet.param2 & MAV_DO_REPOSITION_FLAGS_CHANGE_MODE) == MAV_DO_REPOSITION_FLAGS_CHANGE_MODE;
+    if (!sub.flightmode->in_guided_mode() && !change_modes) {
+        return MAV_RESULT_DENIED;
+    }
+
+    // sanity check location
+    if (!check_latlng(packet.x, packet.y)) {
+        return MAV_RESULT_DENIED;
+    }
+
+    Location request_location;
+    if (!location_from_command_t(packet, request_location)) {
+        return MAV_RESULT_DENIED;
+    }
+
+    if (request_location.sanitize(sub.current_loc)) {
+        // if the location wasn't already sane don't load it
+        return MAV_RESULT_DENIED; // failed as the location is not valid
+    }
+
+    // we need to do this first, as we don't want to change the flight mode unless we can also set the target
+    if (!sub.mode_guided.guided_set_destination(request_location)) {
+        return MAV_RESULT_FAILED;
+    }
+
+    if (!sub.flightmode->in_guided_mode()) {
+        if (!sub.set_mode(Mode::Number::GUIDED, ModeReason::GCS_COMMAND)) {
+            return MAV_RESULT_FAILED;
+        }
+        // the position won't have been loaded if we had to change the flight mode, so load it again
+        if (!sub.mode_guided.guided_set_destination(request_location)) {
+            return MAV_RESULT_FAILED;
+        }
+    }
+
+    return MAV_RESULT_ACCEPTED;
 }
 
 MAV_RESULT GCS_MAVLINK_Sub::handle_command_int_packet(const mavlink_command_int_t &packet, const mavlink_message_t &msg)
@@ -490,7 +538,14 @@ MAV_RESULT GCS_MAVLINK_Sub::handle_command_int_packet(const mavlink_command_int_
     case MAV_CMD_DO_MOTOR_TEST:
         return handle_MAV_CMD_DO_MOTOR_TEST(packet);
 
+    case MAV_CMD_DO_REPOSITION:
+        return handle_command_int_do_reposition(packet);
+
     case MAV_CMD_MISSION_START:
+        if (!is_zero(packet.param1) || !is_zero(packet.param2)) {
+            // first-item/last item not supported
+            return MAV_RESULT_DENIED;
+        }
         return handle_MAV_CMD_MISSION_START(packet);
 
     case MAV_CMD_NAV_LOITER_UNLIM:
@@ -568,7 +623,7 @@ MAV_RESULT GCS_MAVLINK_Sub::handle_MAV_CMD_DO_MOTOR_TEST(const mavlink_command_i
         return MAV_RESULT_ACCEPTED;
 }
 
-void GCS_MAVLINK_Sub::handleMessage(const mavlink_message_t &msg)
+void GCS_MAVLINK_Sub::handle_message(const mavlink_message_t &msg)
 {
     switch (msg.msgid) {
 
@@ -817,7 +872,7 @@ void GCS_MAVLINK_Sub::handleMessage(const mavlink_message_t &msg)
         break;
 
     default:
-        handle_common_message(msg);
+        GCS_MAVLINK::handle_message(msg);
         break;
     }     // end switch
 } // end handle mavlink
@@ -837,7 +892,8 @@ uint64_t GCS_MAVLINK_Sub::capabilities() const
         );
 }
 
-MAV_RESULT GCS_MAVLINK_Sub::handle_flight_termination(const mavlink_command_int_t &packet) {
+MAV_RESULT GCS_MAVLINK_Sub::handle_flight_termination(const mavlink_command_int_t &packet)
+{
     if (packet.param1 > 0.5f) {
         sub.arming.disarm(AP_Arming::Method::TERMINATION);
         return MAV_RESULT_ACCEPTED;
@@ -845,17 +901,14 @@ MAV_RESULT GCS_MAVLINK_Sub::handle_flight_termination(const mavlink_command_int_
     return MAV_RESULT_FAILED;
 }
 
-int32_t GCS_MAVLINK_Sub::global_position_int_alt() const {
-    if (!sub.ap.depth_sensor_present) {
-        return 0;
-    }
-    return GCS_MAVLINK::global_position_int_alt();
+int32_t GCS_MAVLINK_Sub::global_position_int_alt() const
+{
+    return static_cast<int32_t>(sub.get_alt_msl() * 1000.0f);
 }
-int32_t GCS_MAVLINK_Sub::global_position_int_relative_alt() const {
-    if (!sub.ap.depth_sensor_present) {
-        return 0;
-    }
-    return GCS_MAVLINK::global_position_int_relative_alt();
+
+int32_t GCS_MAVLINK_Sub::global_position_int_relative_alt() const
+{
+    return static_cast<int32_t>(sub.get_alt_rel() * 1000.0f);
 }
 
 #if HAL_HIGH_LATENCY2_ENABLED

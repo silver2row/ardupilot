@@ -1,7 +1,6 @@
 #pragma once
 
 #include <AP_Param/AP_Param.h>
-#include "AP_Relay_config.h"
 
 class AP_Relay_Params {
 public:
@@ -71,4 +70,5 @@ public:
     AP_Enum<FUNCTION> function;            // relay function
     AP_Int16 pin;                          // gpio pin number
     AP_Enum<DefaultState> default_state;  // default state
+    AP_Int8 inverted;                       // inverted signal
 };

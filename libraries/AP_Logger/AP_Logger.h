@@ -5,6 +5,8 @@
 
 #include "AP_Logger_config.h"
 
+#if HAL_LOGGING_ENABLED
+
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Common/AP_Common.h>
 #include <AP_Param/AP_Param.h>
@@ -77,8 +79,15 @@ enum class LogEvent : uint8_t {
     STANDBY_ENABLE = 74,
     STANDBY_DISABLE = 75,
 
-    FENCE_FLOOR_ENABLE = 80,
-    FENCE_FLOOR_DISABLE = 81,
+    // Fence events
+    FENCE_ALT_MAX_ENABLE = 76,
+    FENCE_ALT_MAX_DISABLE = 77,
+    FENCE_CIRCLE_ENABLE = 78,
+    FENCE_CIRCLE_DISABLE = 79,
+    FENCE_ALT_MIN_ENABLE = 80,
+    FENCE_ALT_MIN_DISABLE = 81,
+    FENCE_POLYGON_ENABLE = 82,
+    FENCE_POLYGON_DISABLE = 83,
 
     // if the EKF's source input set is changed (e.g. via a switch or
     // a script), we log an event:
@@ -185,7 +194,7 @@ class AP_Logger
 public:
     FUNCTOR_TYPEDEF(vehicle_startup_message_Writer, void);
 
-    AP_Logger(const AP_Int32 &log_bitmask);
+    AP_Logger();
 
     /* Do not allow copies */
     CLASS_NO_COPY(AP_Logger);
@@ -196,7 +205,7 @@ public:
     }
 
     // initialisation
-    void Init(const struct LogStructure *structure, uint8_t num_types);
+    void init(const AP_Int32 &log_bitmask, const struct LogStructure *structure, uint8_t num_types);
     void set_num_types(uint8_t num_types) { _num_types = num_types; }
 
     bool CardInserted(void);
@@ -271,9 +280,6 @@ public:
                           const class RallyLocation &rally_point);
     void Write_SRTL(bool active, uint16_t num_points, uint16_t max_points, uint8_t action, const Vector3f& point);
     void Write_Winch(bool healthy, bool thread_end, bool moving, bool clutch, uint8_t mode, float desired_length, float length, float desired_rate, uint16_t tension, float voltage, int8_t temp);
-    void Write_PSCN(float pos_target, float pos, float vel_desired, float vel_target, float vel, float accel_desired, float accel_target, float accel);
-    void Write_PSCE(float pos_target, float pos, float vel_desired, float vel_target, float vel, float accel_desired, float accel_target, float accel);
-    void Write_PSCD(float pos_target, float pos, float vel_desired, float vel_target, float vel, float accel_desired, float accel_target, float accel);
 
     void Write(const char *name, const char *labels, const char *fmt, ...);
     void Write(const char *name, const char *labels, const char *units, const char *mults, const char *fmt, ...);
@@ -383,7 +389,6 @@ public:
         struct log_write_fmt *next;
         uint8_t msg_type;
         uint8_t msg_len;
-        uint8_t sent_mask; // bitmask of backends sent to
         const char *name;
         const char *fmt;
         const char *labels;
@@ -424,7 +429,7 @@ private:
     #define LOGGER_MAX_BACKENDS 2
     uint8_t _next_backend;
     AP_Logger_Backend *backends[LOGGER_MAX_BACKENDS];
-    const AP_Int32 &_log_bitmask;
+    const AP_Int32 *_log_bitmask;
 
     enum class Backend_Type : uint8_t {
         NONE       = 0,
@@ -453,7 +458,7 @@ private:
     int16_t find_free_msg_type() const;
 
     // fill LogStructure with information about msg_type
-    bool fill_log_write_logstructure(struct LogStructure &logstruct, const uint8_t msg_type) const;
+    bool fill_logstructure(struct LogStructure &logstruct, const uint8_t msg_type) const;
 
     bool _armed;
 
@@ -586,6 +591,7 @@ private:
     void handle_log_request_data(class GCS_MAVLINK &, const mavlink_message_t &msg);
     void handle_log_request_erase(class GCS_MAVLINK &, const mavlink_message_t &msg);
     void handle_log_request_end(class GCS_MAVLINK &, const mavlink_message_t &msg);
+    void end_log_transfer();
     void handle_log_send_listing(); // handle LISTING state
     void handle_log_sending(); // handle SENDING state
     bool handle_log_send_data(); // send data chunk to client
@@ -596,10 +602,6 @@ private:
 
     /* end support for retrieving logs via mavlink: */
 
-    // convenience method for writing out the identical NED PIDs - and
-    // to save bytes
-    void Write_PSCx(LogMessages ID, float pos_target, float pos, float vel_desired, float vel_target, float vel, float accel_desired, float accel_target, float accel);
-
 #if HAL_LOGGER_FILE_CONTENTS_ENABLED
     void log_file_content(FileContent &file_content, const char *filename);
     void file_content_update(FileContent &file_content);
@@ -609,3 +611,13 @@ private:
 namespace AP {
     AP_Logger &logger();
 };
+
+#define LOGGER_WRITE_ERROR(subsys, err) AP::logger().Write_Error(subsys, err)
+#define LOGGER_WRITE_EVENT(evt) AP::logger().Write_Event(evt)
+
+#else
+
+#define LOGGER_WRITE_ERROR(subsys, err)
+#define LOGGER_WRITE_EVENT(evt)
+
+#endif  // HAL_LOGGING_ENABLED

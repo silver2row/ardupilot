@@ -47,7 +47,7 @@ typedef struct {
 #define MAX_FILES 16
 static FAT_FILE *file_table[MAX_FILES];
 
-static int isatty_(int fileno)
+static bool isatty_(int fileno)
 {
     if (fileno >= 0 && fileno <= 2) {
         return true;
@@ -706,7 +706,7 @@ void *AP_Filesystem_FATFS::opendir(const char *pathdir)
     CHECK_REMOUNT_NULL();
 
     debug("Opendir %s", pathdir);
-    struct DIR_Wrapper *ret = new DIR_Wrapper;
+    struct DIR_Wrapper *ret = NEW_NOTHROW DIR_Wrapper;
     if (!ret) {
         return nullptr;
     }
@@ -828,7 +828,8 @@ int64_t AP_Filesystem_FATFS::disk_space(const char *path)
  */
 static void unix_time_to_fat(time_t epoch, uint16_t &date, uint16_t &time)
 {
-    struct tm *t = gmtime((time_t *)&epoch);
+    struct tm tmd {};
+    struct tm *t = gmtime_r((time_t *)&epoch, &tmd);
 
     /* Pack date and time into a uint32_t variable */
     date = ((uint16_t)(t->tm_year - 80) << 9)

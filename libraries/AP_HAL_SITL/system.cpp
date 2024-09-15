@@ -18,12 +18,19 @@ using HALSITL::Scheduler;
 namespace AP_HAL {
 
 static struct {
-    struct timeval start_time;
+    uint64_t start_time_ns;
 } state;
 
+static uint64_t ts_to_nsec(struct timespec &ts)
+{
+    return ts.tv_sec*1000000000ULL + ts.tv_nsec;
+}
+    
 void init()
 {
-    gettimeofday(&state.start_time, nullptr);
+    struct timespec ts {};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    state.start_time_ns = ts_to_nsec(ts);
 }
 
 #if defined(__CYGWIN__) || defined(__CYGWIN64__) || defined(CYGWIN_BUILD)
@@ -58,13 +65,24 @@ static void run_command_on_ownpid(const char *commandname)
     // find dumpstack command:
     const char *command_filepath = commandname; // if we can't find it trust in PATH
     struct stat statbuf;
+    const char *custom_scripts_dir_path = getenv("AP_SCRIPTS_DIR_PATH");
+    char *custom_scripts_dir_path_pattern = nullptr;
+    if (custom_scripts_dir_path != nullptr) {
+        if (asprintf(&custom_scripts_dir_path_pattern, "%s/%%s", custom_scripts_dir_path) == -1) {
+            custom_scripts_dir_path_pattern = nullptr;
+        }
+    }
     const char *paths[] {
+        custom_scripts_dir_path_pattern,
         "Tools/scripts/%s",
         "APM/Tools/scripts/%s", // for autotest server
         "../Tools/scripts/%s", // when run from e.g. ArduCopter subdirectory
     };
     char buffer[60];
     for (uint8_t i=0; i<ARRAY_SIZE(paths); i++) {
+        if (paths[i] == nullptr) {
+            continue;
+        }
         // form up a filepath from each path and commandname; if it
         // exists, use it
         snprintf(buffer, sizeof(buffer), paths[i], commandname);
@@ -73,6 +91,7 @@ static void run_command_on_ownpid(const char *commandname)
             break;
         }
     }
+    free(custom_scripts_dir_path_pattern);
 
 	char progname[100];
 	int n = readlink("/proc/self/exe", progname, sizeof(progname)-1);
@@ -170,12 +189,9 @@ uint64_t micros64()
         return stopped_usec;
     }
 
-    struct timeval tp;
-    gettimeofday(&tp, nullptr);
-    uint64_t ret = 1.0e6 * ((tp.tv_sec + (tp.tv_usec * 1.0e-6)) -
-                            (state.start_time.tv_sec +
-                             (state.start_time.tv_usec * 1.0e-6)));
-    return ret;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return uint64_div1000(ts_to_nsec(ts) - state.start_time_ns);
 }
 
 uint64_t millis64()

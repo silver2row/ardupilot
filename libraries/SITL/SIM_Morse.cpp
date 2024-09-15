@@ -29,7 +29,6 @@
 #include <sys/types.h>
 
 #include <AP_HAL/AP_HAL.h>
-#include <AP_Logger/AP_Logger.h>
 #include "pthread.h"
 #include <AP_HAL/utility/replace.h>
 
@@ -261,7 +260,7 @@ bool Morse::parse_sensors(const char *json)
 bool Morse::connect_sockets(void)
 {
     if (!sensors_sock) {
-        sensors_sock = new SocketAPM_native(false);
+        sensors_sock = NEW_NOTHROW SocketAPM_native(false);
         if (!sensors_sock) {
             AP_HAL::panic("Out of memory for sensors socket");
         }
@@ -280,7 +279,7 @@ bool Morse::connect_sockets(void)
         printf("Sensors connected\n");
     }
     if (!control_sock) {
-        control_sock = new SocketAPM_native(false);
+        control_sock = NEW_NOTHROW SocketAPM_native(false);
         if (!control_sock) {
             AP_HAL::panic("Out of memory for control socket");
         }
@@ -567,7 +566,9 @@ void Morse::update(const struct sitl_input &input)
 
     report_FPS();
 
+#if HAL_GCS_ENABLED
     send_report();
+#endif
 }
 
 
@@ -592,6 +593,7 @@ void Morse::report_FPS(void)
 
 
 
+#if HAL_GCS_ENABLED
 /*
   send a report to the vehicle control code over MAVLink
 */
@@ -670,5 +672,6 @@ void Morse::send_report(void)
     }
 
 }
+#endif  // HAL_GCS_ENABLED
 
 #endif  // HAL_SIM_MORSE_ENABLED
