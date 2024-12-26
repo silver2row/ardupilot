@@ -41,6 +41,15 @@
 
 #include <AP_Common/ExpandingString.h>
 #include <AP_Common/sorting.h>
+#include <AP_Logger/AP_Logger.h>
+
+/*
+  avoid a recursion issue with config defines
+ */
+#if AP_CAN_LOGGING_ENABLED && !HAL_LOGGING_ENABLED
+#undef AP_CAN_LOGGING_ENABLED
+#define AP_CAN_LOGGING_ENABLED 0
+#endif
 
 #define LOG_TAG "CANMGR"
 #define LOG_BUFFER_SIZE 1024
@@ -260,6 +269,10 @@ void AP_CANManager::init()
 
         _drivers[drv_num]->init(drv_num, enable_filter);
     }
+
+#if AP_CAN_LOGGING_ENABLED
+    hal.scheduler->register_io_process(FUNCTOR_BIND_MEMBER(&AP_CANManager::check_logging_enable, void));
+#endif
 }
 #else
 void AP_CANManager::init()
@@ -372,6 +385,7 @@ void AP_CANManager::log_text(AP_CANManager::LogLevel loglevel, const char *tag, 
     if (loglevel > _loglevel) {
         return;
     }
+    WITH_SEMAPHORE(_sem);
 
     if ((LOG_BUFFER_SIZE - _log_pos) < (10 + strlen(tag) + strlen(fmt))) {
         // reset log pos
@@ -426,32 +440,42 @@ bool AP_CANManager::handle_can_forward(mavlink_channel_t chan, const mavlink_com
 {
     WITH_SEMAPHORE(can_forward.sem);
     const int8_t bus = int8_t(packet.param1)-1;
+
     if (bus == -1) {
-        for (auto can_iface : hal.can) {
-            if (can_iface) {
-                can_iface->register_frame_callback(nullptr);
-            }
+        /*
+          a request to stop forwarding
+         */
+        if (can_forward.callback_id != 0) {
+            hal.can[can_forward.callback_bus]->unregister_frame_callback(can_forward.callback_id);
+            can_forward.callback_id = 0;
         }
         return true;
     }
+
     if (bus >= HAL_NUM_CAN_IFACES || hal.can[bus] == nullptr) {
         return false;
     }
-    if (!hal.can[bus]->register_frame_callback(
-            FUNCTOR_BIND_MEMBER(&AP_CANManager::can_frame_callback, void, uint8_t, const AP_HAL::CANFrame &))) {
+
+    if (can_forward.callback_id != 0 && can_forward.callback_bus != bus) {
+        /*
+          the client is changing which bus they are monitoring, unregister from the previous bus
+         */
+        hal.can[can_forward.callback_bus]->unregister_frame_callback(can_forward.callback_id);
+        can_forward.callback_id = 0;
+    }
+
+    if (can_forward.callback_id == 0 &&
+        !hal.can[bus]->register_frame_callback(
+            FUNCTOR_BIND_MEMBER(&AP_CANManager::can_frame_callback, void, uint8_t, const AP_HAL::CANFrame &), can_forward.callback_id)) {
+        // failed to register the callback
         return false;
     }
+
+    can_forward.callback_bus = bus;
     can_forward.last_callback_enable_ms = AP_HAL::millis();
     can_forward.chan = chan;
     can_forward.system_id = msg.sysid;
     can_forward.component_id = msg.compid;
-
-    // remove registration on other buses, allowing for bus change in the GUI tool
-    for (uint8_t i=0; i<HAL_NUM_CAN_IFACES; i++) {
-        if (i != bus && hal.can[i] != nullptr) {
-            hal.can[i]->register_frame_callback(nullptr);
-        }
-    }
 
     return true;
 }
@@ -499,6 +523,7 @@ void AP_CANManager::handle_can_frame(const mavlink_message_t &msg)
         frame_buffer->push(frame);
         break;
     }
+#if HAL_CANFD_SUPPORTED
     case MAVLINK_MSG_ID_CANFD_FRAME: {
         mavlink_canfd_frame_t p;
         mavlink_msg_canfd_frame_decode(&msg, &p);
@@ -513,6 +538,7 @@ void AP_CANManager::handle_can_frame(const mavlink_message_t &msg)
         frame_buffer->push(frame);
         break;
     }
+#endif
     }
     process_frame_buffer();
 }
@@ -639,12 +665,18 @@ void AP_CANManager::handle_can_filter_modify(const mavlink_message_t &msg)
 void AP_CANManager::can_frame_callback(uint8_t bus, const AP_HAL::CANFrame &frame)
 {
     WITH_SEMAPHORE(can_forward.sem);
+    if (bus != can_forward.callback_bus) {
+        // we are not registered for forwarding this bus, discard frame
+        return;
+    }
     if (can_forward.frame_counter++ == 100) {
         // check every 100 frames for disabling CAN_FRAME send
         // we stop sending after 5s if the client stops
         // sending MAV_CMD_CAN_FORWARD requests
-        if (AP_HAL::millis() - can_forward.last_callback_enable_ms > 5000) {
-            hal.can[bus]->register_frame_callback(nullptr);
+        if (can_forward.callback_id != 0 &&
+            AP_HAL::millis() - can_forward.last_callback_enable_ms > 5000) {
+            hal.can[bus]->unregister_frame_callback(can_forward.callback_id);
+            can_forward.callback_id = 0;
             return;
         }
         can_forward.frame_counter = 0;
@@ -668,12 +700,15 @@ void AP_CANManager::can_frame_callback(uint8_t bus, const AP_HAL::CANFrame &fram
         }
     }
     const uint8_t data_len = AP_HAL::CANFrame::dlcToDataLength(frame.dlc);
+#if HAL_CANFD_SUPPORTED
     if (frame.isCanFDFrame()) {
         if (HAVE_PAYLOAD_SPACE(can_forward.chan, CANFD_FRAME)) {
             mavlink_msg_canfd_frame_send(can_forward.chan, can_forward.system_id, can_forward.component_id,
                                          bus, data_len, frame.id, const_cast<uint8_t*>(frame.data));
         }
-    } else {
+    } else
+#endif
+    {
         if (HAVE_PAYLOAD_SPACE(can_forward.chan, CAN_FRAME)) {
             mavlink_msg_can_frame_send(can_forward.chan, can_forward.system_id, can_forward.component_id,
                                        bus, data_len, frame.id, const_cast<uint8_t*>(frame.data));
@@ -681,6 +716,61 @@ void AP_CANManager::can_frame_callback(uint8_t bus, const AP_HAL::CANFrame &fram
     }
 }
 #endif // HAL_GCS_ENABLED
+
+#if AP_CAN_LOGGING_ENABLED
+/*
+  handler for CAN frames for frame logging
+ */
+void AP_CANManager::can_logging_callback(uint8_t bus, const AP_HAL::CANFrame &frame)
+{
+#if HAL_CANFD_SUPPORTED
+    if (frame.canfd) {
+        struct log_CAFD pkt {
+            LOG_PACKET_HEADER_INIT(LOG_CAFD_MSG),
+            time_us : AP_HAL::micros64(),
+            bus     : bus,
+            id      : frame.id,
+            dlc     : frame.dlc
+        };
+        memcpy(pkt.data, frame.data, frame.dlcToDataLength(frame.dlc));
+        AP::logger().WriteBlock(&pkt, sizeof(pkt));
+        return;
+    }
+#endif
+    struct log_CANF pkt {
+        LOG_PACKET_HEADER_INIT(LOG_CANF_MSG),
+        time_us : AP_HAL::micros64(),
+        bus     : bus,
+        id      : frame.id,
+        dlc     : frame.dlc
+    };
+    memcpy(pkt.data, frame.data, frame.dlc);
+    AP::logger().WriteBlock(&pkt, sizeof(pkt));
+}
+
+/*
+  see if we need to enable/disable the CAN logging callback
+ */
+void AP_CANManager::check_logging_enable(void)
+{
+    for (uint8_t i = 0; i < HAL_NUM_CAN_IFACES; i++) {
+        const bool enabled = _interfaces[i].option_is_set(CANIface_Params::Options::LOG_ALL_FRAMES);
+        uint8_t &logging_id = _interfaces[i].logging_id;
+        auto *can = hal.can[i];
+        if (can == nullptr) {
+            continue;
+        }
+        if (enabled && logging_id == 0) {
+            can->register_frame_callback(
+                FUNCTOR_BIND_MEMBER(&AP_CANManager::can_logging_callback, void, uint8_t, const AP_HAL::CANFrame &),
+                logging_id);
+        } else if (!enabled && logging_id != 0) {
+            can->unregister_frame_callback(logging_id);
+        }
+    }
+}
+
+#endif // AP_CAN_LOGGING_ENABLED
 
 AP_CANManager& AP::can()
 {

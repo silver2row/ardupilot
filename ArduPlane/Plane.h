@@ -92,7 +92,7 @@
  # include <AC_PrecLand/AC_PrecLand.h>
 #endif
 
-#include "GCS_Mavlink.h"
+#include "GCS_MAVLink_Plane.h"
 #include "GCS_Plane.h"
 #include "quadplane.h"
 #include <AP_Tuning/AP_Tuning_config.h>
@@ -115,7 +115,7 @@
 #include <AP_Scripting/AP_Scripting.h>
 #endif
 
-#include "RC_Channel.h"     // RC Channel Library
+#include "RC_Channel_Plane.h"     // RC Channel Library
 #include "Parameters.h"
 #if HAL_ADSB_ENABLED
 #include "avoidance_adsb.h"
@@ -330,6 +330,10 @@ private:
     ModeThermal mode_thermal;
 #endif
 
+#if AP_QUICKTUNE_ENABLED
+    AP_Quicktune quicktune;
+#endif
+    
     // This is the state of the flight control system
     // There are multiple states defined such as MANUAL, FBW-A, AUTO
     Mode *control_mode = &mode_initializing;
@@ -446,6 +450,10 @@ private:
         uint32_t accel_event_ms;
         uint32_t start_time_ms;
         bool waiting_for_rudder_neutral;
+        float throttle_lim_max;
+        float throttle_lim_min;
+        uint32_t throttle_max_timer_ms;
+        uint32_t level_off_start_time_ms;
     } takeoff_state;
 
     // ground steering controller state
@@ -577,11 +585,10 @@ private:
         uint32_t target_airspeed_time_ms;
 
         // altitude adjustments
-        float target_alt = -1;   // don't default to zero here, as zero is a valid alt.
-        uint32_t last_target_alt = 0;
-        float target_alt_accel;
+        Location target_location;
+        float target_alt_rate;
         uint32_t target_alt_time_ms = 0;
-        uint8_t target_alt_frame = 0;
+        uint8_t target_mav_frame = -1;
 
         // heading track
         float target_heading = -4; // don't default to zero or -1 here, as both are valid headings in radians
@@ -872,6 +879,10 @@ private:
     static const TerrainLookupTable Terrain_lookup[];
 #endif
 
+#if AP_QUICKTUNE_ENABLED
+    void update_quicktune(void);
+#endif
+
     // Attitude.cpp
     void adjust_nav_pitch_throttle(void);
     void update_load_factor(void);
@@ -940,7 +951,6 @@ private:
     void Log_Write_RC(void);
     void Log_Write_Vehicle_Startup_Messages();
     void Log_Write_AETR();
-    void log_init();
 #endif
 
     // Parameters.cpp
@@ -1050,7 +1060,7 @@ private:
     bool in_fence_recovery() const;
 #endif
 
-    // ArduPlane.cpp
+    // Plane.cpp
     void disarm_if_autoland_complete();
     bool trigger_land_abort(const float climb_to_alt_m);
     void get_osd_roll_pitch_rad(float &roll, float &pitch) const override;
@@ -1132,11 +1142,12 @@ private:
     bool auto_takeoff_check(void);
     void takeoff_calc_roll(void);
     void takeoff_calc_pitch(void);
-    void takeoff_calc_throttle(const bool use_max_throttle=false);
+    void takeoff_calc_throttle();
     int8_t takeoff_tail_hold(void);
     int16_t get_takeoff_pitch_min_cd(void);
     void landing_gear_update(void);
     bool check_takeoff_timeout(void);
+    bool check_takeoff_timeout_level_off(void);
 
     // avoidance_adsb.cpp
     void avoidance_adsb_update(void);
@@ -1157,7 +1168,7 @@ private:
     void servos_twin_engine_mix();
     void force_flare();
     void throttle_watt_limiter(int8_t &min_throttle, int8_t &max_throttle);
-    void throttle_slew_limit(SRV_Channel::Aux_servo_function_t func);
+    void throttle_slew_limit();
     bool suppress_throttle(void);
     void update_throttle_hover();
     void channel_function_mixer(SRV_Channel::Aux_servo_function_t func1_in, SRV_Channel::Aux_servo_function_t func2_in,

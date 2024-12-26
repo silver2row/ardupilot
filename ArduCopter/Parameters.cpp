@@ -1,6 +1,7 @@
 #include "Copter.h"
 
 #include <AP_Gripper/AP_Gripper.h>
+#include <AP_InertialSensor/AP_InertialSensor_rate_config.h>
 
 /*
    This program is free software: you can redistribute it and/or modify
@@ -160,7 +161,7 @@ const AP_Param::Info Copter::var_info[] = {
     // @Param: FS_GCS_ENABLE
     // @DisplayName: Ground Station Failsafe Enable
     // @Description: Controls whether failsafe will be invoked (and what action to take) when connection with Ground station is lost for at least 5 seconds. See FS_OPTIONS param for additional actions, or for cases allowing Mission continuation, when GCS failsafe is enabled.
-    // @Values: 0:Disabled/NoAction,1:RTL,2:RTL or Continue with Mission in Auto Mode (Removed in 4.0+-see FS_OPTIONS),3:SmartRTL or RTL,4:SmartRTL or Land,5:Land,6:Auto DO_LAND_START or RTL,7:Brake or Land
+    // @Values: 0:Disabled/NoAction,1:RTL,2:RTL or Continue with Mission in Auto Mode (Removed in 4.0+-see FS_OPTIONS),3:SmartRTL or RTL,4:SmartRTL or Land,5:Land,6:Auto DO_LAND_START/DO_RETURN_PATH_START or RTL,7:Brake or Land
     // @User: Standard
     GSCALAR(failsafe_gcs, "FS_GCS_ENABLE", FS_GCS_DISABLED),
 
@@ -224,7 +225,7 @@ const AP_Param::Info Copter::var_info[] = {
     // @Param: FS_THR_ENABLE
     // @DisplayName: Throttle Failsafe Enable
     // @Description: The throttle failsafe allows you to configure a software failsafe activated by a setting on the throttle input channel
-    // @Values:  0:Disabled,1:Enabled always RTL,2:Enabled Continue with Mission in Auto Mode (Removed in 4.0+),3:Enabled always Land,4:Enabled always SmartRTL or RTL,5:Enabled always SmartRTL or Land,6:Enabled Auto DO_LAND_START or RTL,7:Enabled always Brake or Land
+    // @Values:  0:Disabled,1:Enabled always RTL,2:Enabled Continue with Mission in Auto Mode (Removed in 4.0+),3:Enabled always Land,4:Enabled always SmartRTL or RTL,5:Enabled always SmartRTL or Land,6:Enabled Auto DO_LAND_START/DO_RETURN_PATH_START or RTL,7:Enabled always Brake or Land
     // @User: Standard
     GSCALAR(failsafe_throttle,  "FS_THR_ENABLE",   FS_THR_ENABLED_ALWAYS_RTL),
 
@@ -249,7 +250,7 @@ const AP_Param::Info Copter::var_info[] = {
     // @Param: FLTMODE1
     // @DisplayName: Flight Mode 1
     // @Description: Flight mode when pwm of Flightmode channel(FLTMODE_CH) is <= 1230
-    // @Values: 0:Stabilize,1:Acro,2:AltHold,3:Auto,4:Guided,5:Loiter,6:RTL,7:Circle,9:Land,11:Drift,13:Sport,14:Flip,15:AutoTune,16:PosHold,17:Brake,18:Throw,19:Avoid_ADSB,20:Guided_NoGPS,21:Smart_RTL,22:FlowHold,23:Follow,24:ZigZag,25:SystemID,26:Heli_Autorotate,27:Auto RTL
+    // @Values: 0:Stabilize,1:Acro,2:AltHold,3:Auto,4:Guided,5:Loiter,6:RTL,7:Circle,9:Land,11:Drift,13:Sport,14:Flip,15:AutoTune,16:PosHold,17:Brake,18:Throw,19:Avoid_ADSB,20:Guided_NoGPS,21:Smart_RTL,22:FlowHold,23:Follow,24:ZigZag,25:SystemID,26:Heli_Autorotate,27:Auto RTL,28:Turtle
     // @User: Standard
     GSCALAR(flight_mode1, "FLTMODE1",               (uint8_t)FLIGHT_MODE_1),
 
@@ -502,42 +503,42 @@ const AP_Param::Info Copter::var_info[] = {
     GOBJECTPTR(pos_control, "PSC", AC_PosControl),
 
     // @Group: SR0_
-    // @Path: GCS_Mavlink.cpp
+    // @Path: GCS_MAVLink_Copter.cpp
     GOBJECTN(_gcs.chan_parameters[0],  gcs0,       "SR0_",     GCS_MAVLINK_Parameters),
 
 #if MAVLINK_COMM_NUM_BUFFERS >= 2
     // @Group: SR1_
-    // @Path: GCS_Mavlink.cpp
+    // @Path: GCS_MAVLink_Copter.cpp
     GOBJECTN(_gcs.chan_parameters[1],  gcs1,       "SR1_",     GCS_MAVLINK_Parameters),
 #endif
 
 #if MAVLINK_COMM_NUM_BUFFERS >= 3
     // @Group: SR2_
-    // @Path: GCS_Mavlink.cpp
+    // @Path: GCS_MAVLink_Copter.cpp
     GOBJECTN(_gcs.chan_parameters[2],  gcs2,       "SR2_",     GCS_MAVLINK_Parameters),
 #endif
 
 #if MAVLINK_COMM_NUM_BUFFERS >= 4
     // @Group: SR3_
-    // @Path: GCS_Mavlink.cpp
+    // @Path: GCS_MAVLink_Copter.cpp
     GOBJECTN(_gcs.chan_parameters[3],  gcs3,       "SR3_",     GCS_MAVLINK_Parameters),
 #endif
 
 #if MAVLINK_COMM_NUM_BUFFERS >= 5
     // @Group: SR4_
-    // @Path: GCS_Mavlink.cpp
+    // @Path: GCS_MAVLink_Copter.cpp
     GOBJECTN(_gcs.chan_parameters[4],  gcs4,       "SR4_",     GCS_MAVLINK_Parameters),
 #endif
 
 #if MAVLINK_COMM_NUM_BUFFERS >= 6
     // @Group: SR5_
-    // @Path: GCS_Mavlink.cpp
+    // @Path: GCS_MAVLink_Copter.cpp
     GOBJECTN(_gcs.chan_parameters[5],  gcs5,       "SR5_",     GCS_MAVLINK_Parameters),
 #endif
 
 #if MAVLINK_COMM_NUM_BUFFERS >= 7
     // @Group: SR6_
-    // @Path: GCS_Mavlink.cpp
+    // @Path: GCS_MAVLink_Copter.cpp
     GOBJECTN(_gcs.chan_parameters[6],  gcs6,       "SR6_",     GCS_MAVLINK_Parameters),
 #endif
 
@@ -771,7 +772,7 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("GND_EFFECT_COMP", 5, ParametersG2, gndeffect_comp_enabled, 1),
 
-#if ADVANCED_FAILSAFE
+#if AP_COPTER_ADVANCED_FAILSAFE_ENABLED
     // @Group: AFS_
     // @Path: ../libraries/AP_AdvancedFailsafe/AP_AdvancedFailsafe.cpp
     AP_SUBGROUPINFO(afs, "AFS_", 6, ParametersG2, AP_AdvancedFailsafe),
@@ -1043,7 +1044,7 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Param: FS_DR_ENABLE
     // @DisplayName: DeadReckon Failsafe Action
     // @Description: Failsafe action taken immediately as deadreckoning starts. Deadreckoning starts when EKF loses position and velocity source and relies only on wind estimates
-    // @Values: 0:Disabled/NoAction,1:Land, 2:RTL, 3:SmartRTL or RTL, 4:SmartRTL or Land, 6:Auto DO_LAND_START or RTL
+    // @Values: 0:Disabled/NoAction,1:Land, 2:RTL, 3:SmartRTL or RTL, 4:SmartRTL or Land, 6:Auto DO_LAND_START/DO_RETURN_PATH_START or RTL
     // @User: Standard
     AP_GROUPINFO("FS_DR_ENABLE", 52, ParametersG2, failsafe_dr_enable, (uint8_t)Copter::FailsafeAction::RTL),
 
@@ -1232,6 +1233,22 @@ const AP_Param::GroupInfo ParametersG2::var_info2[] = {
     // @User: Advanced
     AP_GROUPINFO("FS_EKF_FILT", 8, ParametersG2, fs_ekf_filt_hz, FS_EKF_FILT_DEFAULT),
 
+#if AP_INERTIALSENSOR_FAST_SAMPLE_WINDOW_ENABLED
+    // @Param: FSTRATE_ENABLE
+    // @DisplayName: Enable the fast Rate thread
+    // @Description: Enable the fast Rate thread. In the default case the fast rate divisor, which controls the update frequency of the thread, is dynamically scaled from FSTRATE_DIV to avoid overrun in the gyro sample buffer and main loop slow-downs. Other values can be selected to fix the divisor to FSTRATE_DIV on arming or always.
+    // @User: Advanced
+    // @Values: 0:Disabled,1:Enabled-Dynamic,2:Enabled-FixedWhenArmed,3:Enabled-Fixed
+    AP_GROUPINFO("FSTRATE_ENABLE", 9, ParametersG2, att_enable, 0),
+
+    // @Param: FSTRATE_DIV
+    // @DisplayName: Fast rate thread divisor
+    // @Description: Fast rate thread divisor used to control the maximum fast rate update rate. The actual rate is the gyro rate in Hz divided by this value. This value is scaled depending on the configuration of FSTRATE_ENABLE.
+    // @User: Advanced
+    // @Range: 1 10
+    AP_GROUPINFO("FSTRATE_DIV", 10, ParametersG2, att_decimation, 1),
+#endif
+
     // ID 62 is reserved for the AP_SUBGROUPEXTENSION
 
     AP_GROUPEND
@@ -1240,8 +1257,11 @@ const AP_Param::GroupInfo ParametersG2::var_info2[] = {
 /*
   constructor for g2 object
  */
-ParametersG2::ParametersG2(void)
-    : command_model_pilot(PILOT_Y_RATE_DEFAULT, PILOT_Y_EXPO_DEFAULT, 0.0f)
+ParametersG2::ParametersG2(void) :
+    unused_integer{17}
+#if HAL_BUTTON_ENABLED
+    ,button_ptr(&copter.button)
+#endif
 #if AP_TEMPCALIBRATION_ENABLED
     , temp_calibration()
 #endif
@@ -1251,20 +1271,20 @@ ParametersG2::ParametersG2(void)
 #if HAL_PROXIMITY_ENABLED
     , proximity()
 #endif
-#if ADVANCED_FAILSAFE
+#if AP_COPTER_ADVANCED_FAILSAFE_ENABLED
     ,afs()
 #endif
 #if MODE_SMARTRTL_ENABLED
     ,smart_rtl()
+#endif
+#if USER_PARAMS_ENABLED
+    ,user_parameters()
 #endif
 #if MODE_FLOWHOLD_ENABLED
     ,mode_flowhold_ptr(&copter.mode_flowhold)
 #endif
 #if MODE_FOLLOW_ENABLED
     ,follow()
-#endif
-#if USER_PARAMS_ENABLED
-    ,user_parameters()
 #endif
 #if AUTOTUNE_ENABLED
     ,autotune_ptr(&copter.mode_autotune.autotune)
@@ -1275,13 +1295,9 @@ ParametersG2::ParametersG2(void)
 #if MODE_AUTOROTATE_ENABLED
     ,arot()
 #endif
-#if HAL_BUTTON_ENABLED
-    ,button_ptr(&copter.button)
-#endif
 #if MODE_ZIGZAG_ENABLED
     ,mode_zigzag_ptr(&copter.mode_zigzag)
 #endif
-
 #if MODE_ACRO_ENABLED || MODE_SPORT_ENABLED
     ,command_model_acro_rp(ACRO_RP_RATE_DEFAULT, ACRO_RP_EXPO_DEFAULT, 0.0f)
 #endif
@@ -1289,6 +1305,8 @@ ParametersG2::ParametersG2(void)
 #if MODE_ACRO_ENABLED || MODE_DRIFT_ENABLED
     ,command_model_acro_y(ACRO_Y_RATE_DEFAULT, ACRO_Y_EXPO_DEFAULT, 0.0f)
 #endif
+
+    ,command_model_pilot(PILOT_Y_RATE_DEFAULT, PILOT_Y_EXPO_DEFAULT, 0.0f)
 
 #if WEATHERVANE_ENABLED
     ,weathervane()

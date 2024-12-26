@@ -37,6 +37,7 @@ public:
         ICM42605, // No HiRes
         ICM40605, // No HiRes
         IIM42652, // HiRes 19bit
+        IIM42653, // HiRes 19bit
         ICM42670, // HiRes 19bit
         ICM45686  // HiRes 20bit
     };
@@ -57,7 +58,7 @@ private:
     void set_filter_and_scaling_icm42670(void);
     void set_filter_and_scaling_icm456xy(void);
     void fifo_reset();
-    uint16_t calculate_fast_sampling_backend_rate(uint16_t base_odr, uint16_t max_odr) const;
+    uint16_t calculate_fast_sampling_backend_rate(uint16_t base_backend_rate, uint16_t max_backend_rate) const;
 
     /* Read samples from FIFO */
     void read_fifo();
@@ -140,4 +141,5 @@ private:
 
     float temp_filtered;
     LowPassFilter2pFloat temp_filter;
+    uint32_t sampling_rate_hz;
 };

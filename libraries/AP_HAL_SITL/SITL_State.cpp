@@ -185,12 +185,14 @@ void SITL_State::wait_clock(uint64_t wait_time_usec)
     // conditions.
     if (speedup > 1 && hal.scheduler->in_main_thread()) {
         while (true) {
-            const int queue_length = ((HALSITL::UARTDriver*)hal.serial(0))->get_system_outqueue_length();
+            HALSITL::UARTDriver *uart = (HALSITL::UARTDriver*)hal.serial(0);
+            const int queue_length = uart->get_system_outqueue_length();
             // ::fprintf(stderr, "queue_length=%d\n", (signed)queue_length);
             if (queue_length < 1024) {
                 break;
             }
             _serial_0_outqueue_full_count++;
+            uart->handle_reading_from_device_to_readbuffer();
             usleep(1000);
         }
     }
@@ -398,17 +400,18 @@ void SITL_State::_simulator_servos(struct sitl_input &input)
     }
 
     float engine_mul = _sitl?_sitl->engine_mul.get():1;
-    uint8_t engine_fail = _sitl?_sitl->engine_fail.get():0;
+    uint32_t engine_fail = _sitl?_sitl->engine_fail.get():0;
     float throttle = 0.0f;
     
-    if (engine_fail >= ARRAY_SIZE(input.servos)) {
-        engine_fail = 0;
-    }
     // apply engine multiplier to motor defined by the SIM_ENGINE_FAIL parameter
-    if (_vehicle != Rover) {
-        input.servos[engine_fail] = ((input.servos[engine_fail]-1000) * engine_mul) + 1000;
-    } else {
-        input.servos[engine_fail] = static_cast<uint16_t>(((input.servos[engine_fail] - 1500) * engine_mul) + 1500);
+    for (uint8_t i=0; i<ARRAY_SIZE(input.servos); i++) {
+        if (engine_fail & (1<<i)) {
+            if (_vehicle != Rover) {
+                input.servos[i] = ((input.servos[i]-1000) * engine_mul) + 1000;
+            } else {
+                input.servos[i] = static_cast<uint16_t>(((input.servos[i] - 1500) * engine_mul) + 1500);
+            }
+        }
     }
 
     if (_vehicle == ArduPlane) {

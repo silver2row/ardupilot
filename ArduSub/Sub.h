@@ -67,8 +67,8 @@
 // Local modules
 #include "defines.h"
 #include "config.h"
-#include "GCS_Mavlink.h"
-#include "RC_Channel.h"         // RC Channel Library
+#include "GCS_MAVLink_Sub.h"
+#include "RC_Channel_Sub.h"         // RC Channel Library
 #include "Parameters.h"
 #include "AP_Arming_Sub.h"
 #include "GCS_Sub.h"
@@ -535,8 +535,6 @@ private:
     bool verify_nav_guided_enable(const AP_Mission::Mission_Command& cmd);
 #endif
     bool verify_nav_delay(const AP_Mission::Mission_Command& cmd);
-
-    void log_init(void);
 
     void failsafe_leak_check();
     void failsafe_internal_pressure_check();
