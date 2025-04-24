@@ -50,12 +50,12 @@ public:
         k_param_sitl, // Simulation
 
         // Telemetry
-        k_param_gcs0 = 10,
-        k_param_gcs1,
-        k_param_gcs2,
-        k_param_gcs3,
-        k_param_sysid_this_mav,
-        k_param_sysid_my_gcs,
+        k_param_gcs0_unused = 10,      // unused in ArduPilot-4.7
+        k_param_gcs1_unused,           // unused in ArduPilot-4.7
+        k_param_gcs2_unused,           // unused in ArduPilot-4.7
+        k_param_gcs3_unused,           // unused in ArduPilot-4.7
+        k_param_sysid_this_mav_old,
+        k_param_sysid_my_gcs_old,
 
         // Hardware/Software configuration
         k_param_BoardConfig = 20, // Board configuration (Pixhawk/Linux/etc)
@@ -222,26 +222,25 @@ public:
         // RC_Mapper Library
         k_param_rcmap, // Disabled
 
-        k_param_gcs4,
-        k_param_gcs5,
-        k_param_gcs6,
+        k_param_gcs4_unused,           // unused in ArduPilot-4.7
+        k_param_gcs5_unused,           // unused in ArduPilot-4.7
+        k_param_gcs6_unused,           // unused in ArduPilot-4.7
 
         k_param_cam_slew_limit = 237, // deprecated
         k_param_lights_steps,
         k_param_pilot_speed_dn,
         k_param_rangefinder_signal_min,
         k_param_surftrak_depth,
+        k_param_pilot_speed,
 
         k_param_vehicle = 257, // vehicle common block of parameters
+        k_param__gcs = 258,
     };
 
     AP_Int16        format_version;
 
     // Telemetry control
     //
-    AP_Int16        sysid_this_mav;
-    AP_Int16        sysid_my_gcs;
-
     AP_Float        throttle_filt;
 
 #if AP_RANGEFINDER_ENABLED
@@ -267,9 +266,10 @@ public:
 
     // Waypoints
     //
-    AP_Int16        pilot_speed_up;        // maximum vertical ascending velocity the pilot may request
-    AP_Int16        pilot_speed_dn;        // maximum vertical descending velocity the pilot may request
-    AP_Int16        pilot_accel_z;               // vertical acceleration the pilot may request
+    AP_Int16        pilot_speed_up;             // maximum vertical ascending velocity the pilot may request
+    AP_Int16        pilot_speed_dn;             // maximum vertical descending velocity the pilot may request
+    AP_Int16        pilot_speed;                // maximum horizontal (xy) velocity the pilot may request
+    AP_Int16        pilot_accel_z;              // vertical acceleration the pilot may request
 
     // Throttle
     //
@@ -378,9 +378,9 @@ extern const AP_Param::Info        var_info[];
 // Sub-specific default parameters
 static const struct AP_Param::defaults_table_struct defaults_table[] = {
     { "BRD_SAFETY_DEFLT",    0 },
-    { "ARMING_CHECK",        AP_Arming::ARMING_CHECK_RC |
-                             AP_Arming::ARMING_CHECK_VOLTAGE |
-                             AP_Arming::ARMING_CHECK_BATTERY},
+    { "ARMING_CHECK",        uint32_t(AP_Arming::Check::RC) |
+                             uint32_t(AP_Arming::Check::VOLTAGE) |
+                             uint32_t(AP_Arming::Check::BATTERY)},
     { "CIRCLE_RATE",         2.0f},
     { "ATC_ACCEL_Y_MAX",     110000.0f},
     { "ATC_RATE_Y_MAX",      180.0f},

@@ -91,6 +91,7 @@ const AP_Scheduler::Task Sub::scheduler_tasks[] = {
 #if HAL_LOGGING_ENABLED
     SCHED_TASK(ten_hz_logging_loop,   10,    350,  51),
     SCHED_TASK(twentyfive_hz_logging, 25,    110,  54),
+    SCHED_TASK(loop_rate_logging, LOOP_RATE, 50,   55),
     SCHED_TASK_CLASS(AP_Logger,           &sub.logger,       periodic_tasks,     400, 300,  57),
 #endif
     SCHED_TASK_CLASS(AP_InertialSensor,   &sub.ins,          periodic,           400,  50,  60),
@@ -189,7 +190,7 @@ void Sub::ten_hz_logging_loop()
             logger.Write_PID(LOG_PIDR_MSG, attitude_control.get_rate_roll_pid().get_pid_info());
             logger.Write_PID(LOG_PIDP_MSG, attitude_control.get_rate_pitch_pid().get_pid_info());
             logger.Write_PID(LOG_PIDY_MSG, attitude_control.get_rate_yaw_pid().get_pid_info());
-            logger.Write_PID(LOG_PIDA_MSG, pos_control.get_accel_z_pid().get_pid_info());
+            logger.Write_PID(LOG_PIDA_MSG, pos_control.get_accel_U_pid().get_pid_info());
         }
     }
     if (should_log(MASK_LOG_MOTBATT)) {
@@ -206,9 +207,6 @@ void Sub::ten_hz_logging_loop()
     }
     if (should_log(MASK_LOG_IMU) || should_log(MASK_LOG_IMU_FAST) || should_log(MASK_LOG_IMU_RAW)) {
         AP::ins().Write_Vibration();
-    }
-    if (should_log(MASK_LOG_CTUN)) {
-        attitude_control.control_monitor_log();
     }
 #if HAL_MOUNT_ENABLED
     if (should_log(MASK_LOG_CAMERA)) {
@@ -229,12 +227,20 @@ void Sub::twentyfive_hz_logging()
             logger.Write_PID(LOG_PIDR_MSG, attitude_control.get_rate_roll_pid().get_pid_info());
             logger.Write_PID(LOG_PIDP_MSG, attitude_control.get_rate_pitch_pid().get_pid_info());
             logger.Write_PID(LOG_PIDY_MSG, attitude_control.get_rate_yaw_pid().get_pid_info());
-            logger.Write_PID(LOG_PIDA_MSG, pos_control.get_accel_z_pid().get_pid_info());
+            logger.Write_PID(LOG_PIDA_MSG, pos_control.get_accel_U_pid().get_pid_info());
         }
     }
 
     // log IMU data if we're not already logging at the higher rate
-    if (should_log(MASK_LOG_IMU) && !should_log(MASK_LOG_IMU_RAW)) {
+    if (should_log(MASK_LOG_IMU) && !should_log(MASK_LOG_IMU_FAST)) {
+        AP::ins().Write_IMU();
+    }
+}
+
+// Full rate logging of IMU
+void Sub::loop_rate_logging()
+{
+    if (should_log(MASK_LOG_IMU_FAST)) {
         AP::ins().Write_IMU();
     }
 }
@@ -257,11 +263,6 @@ void Sub::three_hz_loop()
     // check if we've lost terrain data
     failsafe_terrain_check();
 
-#if AP_FENCE_ENABLED
-    // check if we have breached a fence
-    fence_check();
-#endif // AP_FENCE_ENABLED
-
 #if AP_SERVORELAYEVENTS_ENABLED
     ServoRelayEvents.update_events();
 #endif
@@ -270,9 +271,6 @@ void Sub::three_hz_loop()
 // one_hz_loop - runs at 1Hz
 void Sub::one_hz_loop()
 {
-    // sync MAVLink system ID
-    mavlink_system.sysid = g.sysid_this_mav;
-
     bool arm_check = arming.pre_arm_checks(false);
     ap.pre_arm_check = arm_check;
     AP_Notify::flags.pre_arm_check = arm_check;
@@ -302,7 +300,7 @@ void Sub::one_hz_loop()
     set_likely_flying(hal.util->get_soft_armed());
 
     attitude_control.set_notch_sample_rate(AP::scheduler().get_filtered_loop_rate_hz());
-    pos_control.get_accel_z_pid().set_notch_sample_rate(AP::scheduler().get_filtered_loop_rate_hz());
+    pos_control.get_accel_U_pid().set_notch_sample_rate(AP::scheduler().get_filtered_loop_rate_hz());
 }
 
 void Sub::read_AHRS()

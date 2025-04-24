@@ -328,6 +328,9 @@ public:
      */
     void checkLaneSwitch(void);
 
+    // switch to a new lane
+    void switchLane(uint8_t new_lane_index);
+
     /*
       Request a reset of the EKF yaw. This is called when the vehicle code is about to
       trigger an EKF failsafe, and it would like to avoid that.
@@ -455,6 +458,7 @@ private:
     // enum for processing options
     enum class Option {
         JammingExpected     = (1<<0),
+        ManualLaneSwitch   = (1<<1),
     };
     bool option_is_enabled(Option option) const {
         return (_options & (uint32_t)option) != 0;
@@ -530,7 +534,6 @@ private:
         float core_delta;             // the amount of D position change between cores when a change happened
     } pos_down_reset_data;
 
-#define MAX_EKF_CORES     3 // maximum allowed EKF Cores to be instantiated
 #define CORE_ERR_LIM      1 // -LIM to LIM relative error range for a core
 #define BETTER_THRESH   0.5 // a lane should have this much relative error difference to be considered for overriding a healthy primary core
     

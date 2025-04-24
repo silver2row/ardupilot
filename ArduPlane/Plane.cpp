@@ -114,7 +114,6 @@ const AP_Scheduler::Task Plane::scheduler_tasks[] = {
 #if HAL_LOGGING_ENABLED
     SCHED_TASK_CLASS(AP_Scheduler, &plane.scheduler, update_logging,         0.2,    100, 111),
 #endif
-    SCHED_TASK(compass_save,          0.1,    200, 114),
 #if HAL_LOGGING_ENABLED
     SCHED_TASK(Log_Write_FullRate,        400,    300, 117),
     SCHED_TASK(update_logging10,        10,    300, 120),
@@ -352,9 +351,6 @@ void Plane::one_second_loop()
                                   (float)((aparm.airspeed_max - aparm.airspeed_min)/2));
     }
 
-    // sync MAVLink system ID
-    mavlink_system.sysid = g.sysid_this_mav;
-
     AP::srv().enable_aux_servos();
 
     // update notify flags
@@ -405,25 +401,16 @@ void Plane::three_hz_loop()
 #endif
 }
 
-void Plane::compass_save()
-{
-    if (AP::compass().available() &&
-        compass.get_learn_type() >= Compass::LEARN_INTERNAL &&
-        !hal.util->get_soft_armed()) {
-        /*
-          only save offsets when disarmed
-         */
-        compass.save_offsets();
-    }
-}
-
 #if AP_AIRSPEED_AUTOCAL_ENABLE
 /*
   once a second update the airspeed calibration ratio
  */
 void Plane::airspeed_ratio_update(void)
 {
-    if (!airspeed.enabled() ||
+    if (!hal.util->get_soft_armed() ||
+        !ahrs.get_fly_forward() ||
+        !is_flying() ||
+        !airspeed.enabled() ||
         gps.status() < AP_GPS::GPS_OK_FIX_3D ||
         gps.ground_speed() < 4) {
         // don't calibrate when not moving
@@ -514,6 +501,10 @@ void Plane::update_control_mode(void)
     update_fly_forward();
 
     control_mode->update();
+
+#if MODE_AUTOLAND_ENABLED
+    mode_autoland.check_takeoff_direction();
+#endif
 }
 
 
@@ -564,7 +555,23 @@ void Plane::set_flight_stage(AP_FixedWing::FlightStage fs)
         return;
     }
 
-    landing.handle_flight_stage_change(fs == AP_FixedWing::FlightStage::LAND);
+    const bool is_landing = (fs == AP_FixedWing::FlightStage::LAND);
+
+    landing.handle_flight_stage_change(is_landing);
+
+#if AP_LANDINGGEAR_ENABLED
+    if (is_landing) {
+        plane.g2.landing_gear.deploy_for_landing();
+    }
+
+    const bool is_takeoff_complete = (flight_stage == AP_FixedWing::FlightStage::TAKEOFF &&
+                                      fs == AP_FixedWing::FlightStage::NORMAL);
+    if (is_takeoff_complete &&
+        arming.is_armed_and_safety_off() &&
+        is_flying()) {
+            g2.landing_gear.retract_after_takeoff();
+    }
+#endif
 
     if (fs == AP_FixedWing::FlightStage::ABORT_LANDING) {
         gcs().send_text(MAV_SEVERITY_NOTICE, "Landing aborted, climbing to %dm",
@@ -690,7 +697,11 @@ void Plane::update_flight_stage(void)
             }
 #endif
             set_flight_stage(AP_FixedWing::FlightStage::NORMAL);
-        } else if (control_mode != &mode_takeoff) {
+        } else if ((control_mode != &mode_takeoff)
+#if MODE_AUTOLAND_ENABLED
+             && (control_mode != &mode_autoland)
+#endif
+             ) {
             // If not in AUTO then assume normal operation for normal TECS operation.
             // This prevents TECS from being stuck in the wrong stage if you switch from
             // AUTO to, say, FBWB during a landing, an aborted landing or takeoff.
@@ -871,15 +882,15 @@ bool Plane::get_wp_crosstrack_error_m(float &xtrack_error) const
 bool Plane::set_target_location(const Location &target_loc)
 {
     Location loc{target_loc};
+    fix_terrain_WP(loc, __LINE__);
 
     if (plane.control_mode != &plane.mode_guided) {
         // only accept position updates when in GUIDED mode
         return false;
     }
     // add home alt if needed
-    if (loc.relative_alt) {
-        loc.alt += plane.home.alt;
-        loc.relative_alt = 0;
+    if (!loc.terrain_alt) {
+        loc.change_alt_frame(Location::AltFrame::ABSOLUTE);
     }
     plane.set_guided_WP(loc);
     return true;
@@ -926,6 +937,8 @@ bool Plane::update_target_location(const Location &old_loc, const Location &new_
         return false;
     }
     next_WP_loc = new_loc;
+
+    fix_terrain_WP(next_WP_loc, __LINE__);
 
 #if HAL_QUADPLANE_ENABLED
     if (control_mode == &mode_qland || control_mode == &mode_qloiter) {

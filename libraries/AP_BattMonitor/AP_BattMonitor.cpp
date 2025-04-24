@@ -582,6 +582,7 @@ AP_BattMonitor::init()
 #if AP_BATTERY_ANALOG_ENABLED
             case Type::ANALOG_VOLTAGE_ONLY:
             case Type::ANALOG_VOLTAGE_AND_CURRENT:
+            case Type::ANALOG_CURRENT_ONLY:
                 drivers[instance] = NEW_NOTHROW AP_BattMonitor_Analog(*this, state[instance], _params[instance]);
                 break;
 #endif
@@ -1301,6 +1302,9 @@ bool AP_BattMonitor::healthy() const
 bool AP_BattMonitor::handle_scripting(uint8_t idx, const BattMonitorScript_State &_state)
 {
     if (idx >= _num_instances) {
+        return false;
+    }
+    if (drivers[idx] == nullptr) {
         return false;
     }
     return drivers[idx]->handle_scripting(_state);

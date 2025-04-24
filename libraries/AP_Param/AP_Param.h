@@ -51,7 +51,7 @@
  */
 #ifndef AP_PARAM_MAX_EMBEDDED_PARAM
   #if FORCE_APJ_DEFAULT_PARAMETERS
-    #if BOARD_FLASH_SIZE <= 1024
+    #if HAL_PROGRAM_SIZE_LIMIT_KB <= 1024
       #define AP_PARAM_MAX_EMBEDDED_PARAM 1024
     #else
       #define AP_PARAM_MAX_EMBEDDED_PARAM 8192
@@ -1003,61 +1003,6 @@ protected:
 };
 
 
-/// Template class for array variables.
-///
-/// Objects created using this template behave like arrays of the type T,
-/// but are stored like single variables.
-///
-/// @tparam T           The scalar type of the variable
-/// @tparam N           number of elements
-/// @tparam PT          the AP_PARAM_* type
-///
-template<typename T, uint8_t N, ap_var_type PT>
-class AP_ParamA : public AP_Param
-{
-public:
-
-    static const ap_var_type vtype = PT;
-
-    /// Array operator accesses members.
-    ///
-    /// @note It would be nice to range-check i here, but then what would we return?
-    ///
-    const T & operator[](uint8_t i) {
-        return _value[i];
-    }
-
-    const T & operator[](int8_t i) {
-        return _value[(uint8_t)i];
-    }
-
-    /// Value getter
-    ///
-    /// @note   Returns zero for index values out of range.
-    ///
-    T get(uint8_t i) const {
-        if (i < N) {
-            return _value[i];
-        } else {
-            return (T)0;
-        }
-    }
-
-    /// Value setter
-    ///
-    /// @note   Attempts to set an index out of range are discarded.
-    ///
-    void  set(uint8_t i, const T &v) {
-        if (i < N) {
-            _value[i] = v;
-        }
-    }
-
-protected:
-    T _value[N];
-};
-
-
 /// Convenience macro for defining instances of the AP_ParamT template.
 ///
 // declare a scalar type
@@ -1090,6 +1035,9 @@ public:
     void set(eclass v) {
         AP_Int8::set(int8_t(v));
     }
+    void set_and_save(eclass v) {
+        AP_Int8::set_and_save(int8_t(v));
+    }
 };
 
 template<typename eclass>
@@ -1101,5 +1049,8 @@ public:
     }
     void set(eclass v) {
         AP_Int16::set(int16_t(v));
+    }
+    void set_and_save(eclass v) {
+        AP_Int16::set_and_save(int16_t(v));
     }
 };

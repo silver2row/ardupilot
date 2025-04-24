@@ -44,6 +44,8 @@ extern const AP_HAL::HAL& hal;
 extern const HAL_SITL& hal_sitl;
 #endif
 
+Aircraft *Aircraft::instances[MAX_SIM_INSTANCES];
+
 /*
   parent class for all simulator types
  */
@@ -120,6 +122,16 @@ float Aircraft::ground_height_difference() const
     }
 #endif
     return local_ground_level;
+}
+
+float Aircraft::ambient_temperature_degC() const
+{
+    // FIXME: AP_Baro_SITL should be getting temperature from the
+    // simulated aircraft, not the other way around!
+#if !APM_BUILD_TYPE(APM_BUILD_AP_Periph)    // Periph does not instantiate Baro
+    return AP::baro().get_temperature();
+#endif
+    return 25.0;
 }
 
 void Aircraft::set_precland(SIM_Precland *_precland) {
@@ -401,6 +413,8 @@ void Aircraft::fill_fdm(struct sitl_fdm &fdm)
     memcpy(fdm.rcin, rcin, rcin_chan_count * sizeof(float));
     fdm.bodyMagField = mag_bf;
 
+    fdm.bodyMagField.rotate(sitl->imu_orientation);
+
     // copy laser scanner results
     fdm.scanner.points = scanner.points;
     fdm.scanner.ranges = scanner.ranges;
@@ -526,6 +540,25 @@ float Aircraft::perpendicular_distance_to_rangefinder_surface() const
 
 float Aircraft::rangefinder_range() const
 {
+    float altitude = perpendicular_distance_to_rangefinder_surface();
+
+    // sensor position offset in body frame
+    const Vector3f relPosSensorBF = sitl->rngfnd_pos_offset;
+
+    // n.b. the following code is assuming rotation-pitch-270:
+    // adjust altitude for position of the sensor on the vehicle if position offset is non-zero
+    if (!relPosSensorBF.is_zero()) {
+        // get a rotation matrix following DCM conventions (body to earth)
+        Matrix3f rotmat;
+        sitl->state.quaternion.rotation_matrix(rotmat);
+        // rotate the offset into earth frame
+        const Vector3f relPosSensorEF = rotmat * relPosSensorBF;
+        // correct the altitude at the sensor
+        altitude -= relPosSensorEF.z;
+    }
+
+    const auto orientation = (Rotation)sitl->sonar_rot.get();
+#if SITL_RANGEFINDER_AS_OBJECT_SENSOR
 
     float roll = sitl->state.rollDeg;
     float pitch = sitl->state.pitchDeg;
@@ -553,25 +586,6 @@ float Aircraft::rangefinder_range() const
         }
     }
 
-    float altitude = perpendicular_distance_to_rangefinder_surface();
-
-    // sensor position offset in body frame
-    const Vector3f relPosSensorBF = sitl->rngfnd_pos_offset;
-
-    // n.b. the following code is assuming rotation-pitch-270:
-    // adjust altitude for position of the sensor on the vehicle if position offset is non-zero
-    if (!relPosSensorBF.is_zero()) {
-        // get a rotation matrix following DCM conventions (body to earth)
-        Matrix3f rotmat;
-        sitl->state.quaternion.rotation_matrix(rotmat);
-        // rotate the offset into earth frame
-        const Vector3f relPosSensorEF = rotmat * relPosSensorBF;
-        // correct the altitude at the sensor
-        altitude -= relPosSensorEF.z;
-    }
-
-    const auto orientation = (Rotation)sitl->sonar_rot.get();
-#if SITL_RANGEFINDER_AS_OBJECT_SENSOR
     /*
       rover and copter using SITL rangefinders as obstacle sensors
      */
@@ -608,6 +622,11 @@ float Aircraft::rangefinder_range() const
 
     // Add some noise on reading
     altitude += sitl->sonar_noise * rand_float();
+
+    // our starting positions can disagree with the terrain database:
+    if (altitude < 0) {
+        altitude = 0;
+    }
 
     return altitude;
 }
@@ -653,10 +672,12 @@ void Aircraft::update_home()
         if (sitl == nullptr) {
             return;
         }
-        Location loc;
-        loc.lat = sitl->opos.lat.get() * 1.0e7;
-        loc.lng = sitl->opos.lng.get() * 1.0e7;
-        loc.alt = sitl->opos.alt.get() * 1.0e2;
+        const Location loc{
+            int32_t(sitl->opos.lat.get() * 1.0e7),
+            int32_t(sitl->opos.lng.get() * 1.0e7),
+            int32_t(sitl->opos.alt.get() * 1.0e2),
+            Location::AltFrame::ABSOLUTE
+        };
         set_start_location(loc, sitl->opos.hdg.get());
     }
 }
@@ -676,6 +697,8 @@ void Aircraft::update_model(const struct sitl_input &input)
  */
 void Aircraft::update_dynamics(const Vector3f &rot_accel)
 {
+    WITH_SEMAPHORE(pose_sem);
+
     // update eas2tas and air density
 #if AP_AHRS_ENABLED
     eas2tas = AP::ahrs().get_EAS2TAS();
@@ -982,7 +1005,8 @@ void Aircraft::smooth_sensors(void)
  */
 float Aircraft::filtered_servo_angle(const struct sitl_input &input, uint8_t idx)
 {
-    return servo_filter[idx].filter_angle(input.servos[idx], frame_time_us * 1.0e-6);
+    uint16_t pwm = input.servos[idx] == 0 ? 1500 : input.servos[idx];
+    return servo_filter[idx].filter_angle(pwm, frame_time_us * 1.0e-6);
 }
 
 /*
@@ -1129,6 +1153,12 @@ void Aircraft::update_external_payload(const struct sitl_input &input)
     if (fetteconewireesc) {
         fetteconewireesc->update(*this);
     }
+
+#if AP_SIM_VOLZ_ENABLED
+    if (volz) {
+        volz->update(*this);
+    }
+#endif  // AP_SIM_VOLZ_ENABLED
 
 #if AP_SIM_SHIP_ENABLED
     sitl->models.shipsim.update();
@@ -1342,3 +1372,36 @@ void Aircraft::update_eas_airspeed()
         airspeed_pitot *= cosf((pitot_aoa - max_pitot_aoa) * gain_factor);
     }
 }
+
+/*
+  set pose on the aircraft, called from scripting
+ */
+bool Aircraft::set_pose(uint8_t instance, const Location &loc, const Quaternion &quat, const Vector3f &velocity_ef, const Vector3f &gyro_rads)
+{
+    if (instance >= MAX_SIM_INSTANCES || instances[instance] == nullptr) {
+        return false;
+    }
+    auto &aircraft = *instances[instance];
+    WITH_SEMAPHORE(aircraft.pose_sem);
+
+    quat.rotation_matrix(aircraft.dcm);
+    aircraft.velocity_ef = velocity_ef;
+    aircraft.location = loc;
+    aircraft.position = aircraft.home.get_distance_NED_double(loc);
+    aircraft.smoothing.position = aircraft.position;
+    aircraft.smoothing.rotation_b2e = aircraft.dcm;
+    aircraft.smoothing.velocity_ef = velocity_ef;
+    aircraft.smoothing.location = loc;
+    aircraft.gyro = gyro_rads;
+
+    return true;
+}
+
+/*
+  wrapper for scripting access
+ */
+bool SITL::SIM::set_pose(uint8_t instance, const Location &loc, const Quaternion &quat, const Vector3f &velocity_ef, const Vector3f &gyro_rads)
+{
+    return Aircraft::set_pose(instance, loc, quat, velocity_ef, gyro_rads);
+}
+

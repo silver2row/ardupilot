@@ -72,18 +72,6 @@ public:
     // init sets up INS board orientation
     virtual void init();
 
-    // return the index of the primary core or -1 if no primary core selected
-    virtual int8_t get_primary_core_index() const { return -1; }
-
-    // get the index of the current primary accelerometer sensor
-    virtual uint8_t get_primary_accel_index(void) const {
-#if AP_INERTIALSENSOR_ENABLED
-        return AP::ins().get_first_usable_accel();
-#else
-        return 0;
-#endif
-    }
-
     // get the index of the current primary gyro sensor
     virtual uint8_t get_primary_gyro_index(void) const {
 #if AP_INERTIALSENSOR_ENABLED
@@ -148,12 +136,6 @@ public:
         return true;
     }
 
-    // return estimate of true airspeed vector in body frame in m/s
-    // returns false if estimate is unavailable
-    virtual bool airspeed_vector_true(Vector3f &vec) const WARN_IF_UNUSED {
-        return false;
-    }
-
     // get apparent to true airspeed ratio
     static float get_EAS2TAS(void);
     static float get_TAS2EAS(void) { return 1.0/get_EAS2TAS(); }
@@ -194,19 +176,6 @@ public:
     // This is different to the vertical velocity from the EKF which is not always consistent with the vertical position due to the various errors that are being corrected for.
     virtual bool get_vert_pos_rate_D(float &velocity) const = 0;
 
-    // returns the estimated magnetic field offsets in body frame
-    virtual bool get_mag_field_correction(Vector3f &ret) const WARN_IF_UNUSED {
-        return false;
-    }
-
-    virtual bool get_mag_field_NED(Vector3f &vec) const {
-        return false;
-    }
-
-    virtual bool get_mag_offsets(uint8_t mag_idx, Vector3f &magOffsets) const {
-        return false;
-    }
-
     //
     virtual bool set_origin(const Location &loc) {
         return false;
@@ -242,12 +211,6 @@ public:
 
     // return the quaternion defining the rotation from NED to XYZ (body) axes
     virtual bool get_quaternion(Quaternion &quat) const WARN_IF_UNUSED = 0;
-
-    // return true if the AHRS object supports inertial navigation,
-    // with very accurate position and velocity
-    virtual bool have_inertial_nav(void) const {
-        return false;
-    }
 
     // is the AHRS subsystem healthy?
     virtual bool healthy(void) const = 0;

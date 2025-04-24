@@ -62,10 +62,10 @@ RELEASE_CODENAME=$(lsb_release -c -s)
 
 # translate Mint-codenames to Ubuntu-codenames based on https://www.linuxmint.com/download_all.php
 case ${RELEASE_CODENAME} in
-    wilma)
+    wilma | xia)
         RELEASE_CODENAME='noble'
         ;;
-    vanessa)
+    vanessa | vera | victoria | virginia)
         RELEASE_CODENAME='jammy'
         ;;
     una | uma | ulyssa | ulyana | jolnir)
@@ -82,15 +82,11 @@ esac
 PYTHON_V="python3"  # starting from ubuntu 20.04, python isn't symlink to default python interpreter
 PIP=pip3
 
-if [ ${RELEASE_CODENAME} == 'bionic' ] ; then
+if [ ${RELEASE_CODENAME} == 'bionic' ] ||
+      [ ${RELEASE_CODENAME} == 'buster' ]; then
     echo "ArduPilot no longer supports developing on this operating system that has reached end of standard support."
     exit 1
 elif [ ${RELEASE_CODENAME} == 'bookworm' ]; then
-    SITLFML_VERSION="2.5"
-    SITLCFML_VERSION="2.5"
-    PYTHON_V="python3"
-    PIP=pip3
-elif [ ${RELEASE_CODENAME} == 'buster' ]; then
     SITLFML_VERSION="2.5"
     SITLCFML_VERSION="2.5"
     PYTHON_V="python3"
@@ -198,9 +194,9 @@ if [[ $SKIP_AP_GRAPHIC_ENV -ne 1 ]]; then
        [ ${RELEASE_CODENAME} == 'noble' ] ||
        [ ${RELEASE_CODENAME} == 'oracular' ]; then
         PYTHON_PKGS+=" matplotlib scipy opencv-python pyyaml"
-        SITL_PKGS+=" xterm libcsfml-dev libcsfml-audio${SITLCFML_VERSION} libcsfml-dev libcsfml-graphics${SITLCFML_VERSION} libcsfml-network${SITLCFML_VERSION} libcsfml-system${SITLCFML_VERSION} libcsfml-window${SITLCFML_VERSION} libsfml-audio${SITLFML_VERSION} libsfml-dev libsfml-graphics${SITLFML_VERSION} libsfml-network${SITLFML_VERSION} libsfml-system${SITLFML_VERSION} libsfml-window${SITLFML_VERSION}"
+        SITL_PKGS+=" xterm xfonts-base libcsfml-dev libcsfml-audio${SITLCFML_VERSION} libcsfml-dev libcsfml-graphics${SITLCFML_VERSION} libcsfml-network${SITLCFML_VERSION} libcsfml-system${SITLCFML_VERSION} libcsfml-window${SITLCFML_VERSION} libsfml-audio${SITLFML_VERSION} libsfml-dev libsfml-graphics${SITLFML_VERSION} libsfml-network${SITLFML_VERSION} libsfml-system${SITLFML_VERSION} libsfml-window${SITLFML_VERSION}"
   else
-  SITL_PKGS="$SITL_PKGS xterm ${PYTHON_V}-matplotlib ${PYTHON_V}-serial ${PYTHON_V}-scipy ${PYTHON_V}-opencv libcsfml-dev libcsfml-audio${SITLCFML_VERSION} libcsfml-dev libcsfml-graphics${SITLCFML_VERSION} libcsfml-network${SITLCFML_VERSION} libcsfml-system${SITLCFML_VERSION} libcsfml-window${SITLCFML_VERSION} libsfml-audio${SITLFML_VERSION} libsfml-dev libsfml-graphics${SITLFML_VERSION} libsfml-network${SITLFML_VERSION} libsfml-system${SITLFML_VERSION} libsfml-window${SITLFML_VERSION} ${PYTHON_V}-yaml"
+  SITL_PKGS="$SITL_PKGS xterm xfonts-base ${PYTHON_V}-matplotlib ${PYTHON_V}-serial ${PYTHON_V}-scipy ${PYTHON_V}-opencv libcsfml-dev libcsfml-audio${SITLCFML_VERSION} libcsfml-dev libcsfml-graphics${SITLCFML_VERSION} libcsfml-network${SITLCFML_VERSION} libcsfml-system${SITLCFML_VERSION} libcsfml-window${SITLCFML_VERSION} libsfml-audio${SITLFML_VERSION} libsfml-dev libsfml-graphics${SITLFML_VERSION} libsfml-network${SITLFML_VERSION} libsfml-system${SITLFML_VERSION} libsfml-window${SITLFML_VERSION} ${PYTHON_V}-yaml"
   fi
 fi
 if [[ $SKIP_AP_COV_ENV -ne 1 ]]; then
@@ -287,18 +283,19 @@ elif [ ${RELEASE_CODENAME} == 'bookworm' ]; then
     SITL_PKGS+=" libpython3-stdlib" # for argparse
 elif [ ${RELEASE_CODENAME} == 'lunar' ]; then
     SITL_PKGS+=" libpython3-stdlib" # for argparse
-elif [ ${RELEASE_CODENAME} == 'buster' ]; then
-    SITL_PKGS+=" libpython3-stdlib" # for argparse
 elif [ ${RELEASE_CODENAME} != 'mantic' ] &&
      [ ${RELEASE_CODENAME} != 'noble' ] && 
      [ ${RELEASE_CODENAME} != 'oracular' ]; then
-    SITL_PKGS+=" python-argparse"
+    if apt-cache search python-argparse | grep argp; then
+        SITL_PKGS+=" python-argparse"
+    elif apt-cache search python3-argparse | grep argp; then
+        SITL_PKGS+=" python3-argparse"
+    fi
 fi
 
 # Check for graphical package for MAVProxy
 if [[ $SKIP_AP_GRAPHIC_ENV -ne 1 ]]; then
-  if [ ${RELEASE_CODENAME} == 'bullseye' ] ||
-         [ ${RELEASE_CODENAME} == 'buster' ]; then
+  if [ ${RELEASE_CODENAME} == 'bullseye' ]; then
     SITL_PKGS+=" libjpeg62-turbo-dev"
   elif [ ${RELEASE_CODENAME} == 'groovy' ] ||
            [ ${RELEASE_CODENAME} == 'focal' ]; then
@@ -343,7 +340,6 @@ if [[ $SKIP_AP_GRAPHIC_ENV -ne 1 ]]; then
       SITL_PKGS+=" fonts-freefont-ttf libfreetype6-dev libpng16-16 libportmidi-dev libsdl-image1.2-dev libsdl-mixer1.2-dev libsdl-ttf2.0-dev libsdl1.2-dev"  # for pygame
   elif [ ${RELEASE_CODENAME} == 'bullseye' ] ||
          [ ${RELEASE_CODENAME} == 'groovy' ] ||
-         [ ${RELEASE_CODENAME} == 'buster' ] ||
          [ ${RELEASE_CODENAME} == 'focal' ] ||
          [ ${RELEASE_CODENAME} == 'jammy' ]; then
     SITL_PKGS+=" python3-wxgtk4.0"
@@ -367,6 +363,12 @@ SITL_PKGS+=" ppp"
 
 # Install all packages
 $APT_GET install $BASE_PKGS $SITL_PKGS $PX4_PKGS $ARM_LINUX_PKGS $COVERAGE_PKGS
+
+if [[ $SKIP_AP_GRAPHIC_ENV -ne 1 ]]; then
+    # If xfonts-base was just installed, you need to rebuild the font information cache.
+    # https://discuss.ardupilot.org/t/using-the-gdb-window-on-a-high-dpi-display/128150/2
+    fc-cache
+fi
 
 heading "Check if we are inside docker environment..."
 IS_DOCKER=false

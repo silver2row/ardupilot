@@ -117,6 +117,16 @@ const AP_Param::GroupInfo AP_Proximity::var_info[] = {
     AP_SUBGROUPVARPTR(drivers[3], "4_",  29, AP_Proximity, backend_var_info[3]),
 #endif
 
+#if PROXIMITY_MAX_INSTANCES > 4
+    // @Group: 5
+    // @Path: AP_Proximity_Params.cpp
+    AP_SUBGROUPINFO(params[4], "5", 30, AP_Proximity, AP_Proximity_Params),
+
+    // @Group: 5_
+    // @Path: AP_Proximity_MR72_CAN.cpp
+    AP_SUBGROUPVARPTR(drivers[4], "5_",  31, AP_Proximity, backend_var_info[4]),
+#endif
+
     AP_GROUPEND
 };
 
@@ -226,12 +236,17 @@ void AP_Proximity::init()
             drivers[instance] = NEW_NOTHROW AP_Proximity_Scripting(*this, state[instance], params[instance]);
         break;
 #endif
+#if AP_PROXIMITY_MR72_DRIVER_ENABLED
 #if AP_PROXIMITY_MR72_ENABLED
         case Type::MR72:
+#endif  // AP_PROXIMITY_MR72_ENABLED
+#if AP_PROXIMITY_HEXSOONRADAR_ENABLED
+        case Type::Hexsoon_Radar:
+#endif  // AP_PROXIMITY_HEXSOONRADAR_ENABLED
             state[instance].instance = instance;
             drivers[instance] = NEW_NOTHROW AP_Proximity_MR72_CAN(*this, state[instance], params[instance]);
             break;
-# endif
+#endif  // AP_PROXIMITY_MR72_DRIVER_ENABLED
 #if AP_PROXIMITY_SITL_ENABLED
         case Type::SITL:
             state[instance].instance = instance;
