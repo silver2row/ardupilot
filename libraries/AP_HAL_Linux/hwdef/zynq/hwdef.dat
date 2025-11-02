@@ -1,9 +1,8 @@
 # Stub the sensors out for now, at least we can build and run
 define HAL_INS_DEFAULT HAL_INS_NONE
-define HAL_BARO_DEFAULT HAL_BARO_NONE
 
 # only external compasses
-define HAL_PROBE_EXTERNAL_I2C_COMPASSES
+define AP_COMPASS_PROBING_ENABLED 1
 
 # MPU9250 is restricted to 1MHz for non-data and interrupt registers
 #            NAME      BUS SUBDEV MODE       BPW CS_PIN         LOWSPD HIGHSPD

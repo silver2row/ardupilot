@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 Script designed to provide a simple console-based program to
@@ -7,8 +7,6 @@ command the Loweheiser generator via its mavlink interface
 AP_FLAKE8_CLEAN
 
 """
-
-from __future__ import print_function
 
 import sys
 import time
@@ -22,12 +20,6 @@ os.environ['MAVLINK20'] = '1'
 from pymavlink import mavutil  # NOQA
 
 mavutil.set_dialect("all")
-
-# Detect python version
-if sys.version_info[0] < 3:
-    runningPython3 = False
-else:
-    runningPython3 = True
 
 
 class TestLoweheiser(object):
@@ -227,7 +219,7 @@ class TestLoweheiser(object):
             return
         self.last_heartbeat_sent = now
 
-        # self.progress("Sending heatbeat")
+        # self.progress("Sending heartbeat")
         self.conn.mav.heartbeat_send(
             mavutil.mavlink.MAV_TYPE_GCS,
             mavutil.mavlink.MAV_AUTOPILOT_GENERIC,

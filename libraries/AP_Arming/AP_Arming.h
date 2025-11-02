@@ -82,13 +82,18 @@ public:
         DEADRECKON_FAILSAFE = 33, // only disarm uses this...
         BLACKBOX = 34,
         DDS = 35,
+        AUTO_ARM_ONCE = 36,
+        TURTLE_MODE = 37,
+        TOYMODE = 38,
         UNKNOWN = 100,
     };
 
     enum class Required {
         NO           = 0,
         YES_MIN_PWM  = 1,
-        YES_ZERO_PWM = 2
+        YES_ZERO_PWM = 2,
+        YES_AUTO_ARM_MIN_PWM = 3,
+        YES_AUTO_ARM_ZERO_PWM = 4,
     };
 
     void init(void);
@@ -109,6 +114,7 @@ public:
 
     // pre_arm_checks() is virtual so it can be modified in a vehicle specific subclass
     virtual bool pre_arm_checks(bool report);
+    bool get_last_prearm_checks_result() const { return last_prearm_checks_result; }
 
     // some arming checks have side-effects, or require some form of state
     // change to have occurred, and thus should not be done as pre-arm
@@ -149,6 +155,7 @@ public:
     enum class Option : int32_t {
         DISABLE_PREARM_DISPLAY             = (1U << 0),
         DISABLE_STATUSTEXT_ON_STATE_CHANGE = (1U << 1),
+        SKIP_IMU_CONSISTENCY_ICE_RUNNING   = (1U << 2),
     };
     bool option_enabled(Option option) const {
         return (_arming_options & uint32_t(option)) != 0;

@@ -284,7 +284,7 @@ void Plane::Log_Write_Guided(void)
         logger.Write_PID(LOG_PIDG_MSG, g2.guidedHeading.get_pid_info());
     }
 
-    if ( guided_state.target_location.alt != -1 || is_positive(guided_state.target_airspeed_cm) ) {
+    if (!guided_state.target_location_alt_is_minus_one() || is_positive(guided_state.target_airspeed_cm) ) {
         Log_Write_OFG_Guided();
     }
 #endif // AP_PLANE_OFFBOARD_GUIDED_SLEW_ENABLED
@@ -321,7 +321,7 @@ const struct LogStructure Plane::log_structure[] = {
 // @Field: NavRoll: desired roll
 // @Field: Roll: achieved roll
 // @Field: NavPitch: desired pitch assuming pitch trims are already applied
-// @Field: Pitch: achieved pitch assuming pitch trims are already applied,ie "0deg" is level flight trimmed pitch attitude as shown on artifical horizon level line.
+// @Field: Pitch: achieved pitch assuming pitch trims are already applied,ie "0deg" is level flight trimmed pitch attitude as shown on artificial horizon level line.
 // @Field: ThO: scaled output throttle
 // @Field: RdO: scaled output rudder
 // @Field: ThD: demanded speed-height-controller throttle
@@ -377,7 +377,7 @@ const struct LogStructure Plane::log_structure[] = {
 // @Description: Current status of the aircraft
 // @Field: TimeUS: Time since system startup
 // @Field: isFlying: True if aircraft is probably flying
-// @Field: isFlyProb: Probabilty that the aircraft is flying
+// @Field: isFlyProb: Probability that the aircraft is flying
 // @Field: Armed: Arm status of the aircraft
 // @Field: Safety: State of the safety switch
 // @Field: Crash: True if crash is detected
@@ -446,7 +446,7 @@ const struct LogStructure Plane::log_structure[] = {
 // @Field: TimeUS: Time since system startup
 // @Field: Ts: throttle scaling used for tilt motors
 // @Field: Ss: speed scailing used for control surfaces method from Q_TAILSIT_GSCMSK
-// @Field: Tmin: minimum output throttle caculated from disk thoery gain scale with Q_TAILSIT_MIN_VO
+// @Field: Tmin: minimum output throttle calculated from disk thoery gain scale with Q_TAILSIT_MIN_VO
 #if HAL_QUADPLANE_ENABLED
     { LOG_TSIT_MSG, sizeof(Tailsitter::log_tailsitter),
       "TSIT", "Qfff",  "TimeUS,Ts,Ss,Tmin", "s---", "F---" , true },
@@ -530,5 +530,66 @@ void Plane::Log_Write_Vehicle_Startup_Messages()
     ahrs.Log_Write_Home_And_Origin();
     gps.Write_AP_Logger_Log_Startup_messages();
 }
+
+#if AP_PLANE_BLACKBOX_LOGGING
+/*
+  logging for blackbox recording. Split across two messages but with
+  the same timestamp
+ */
+void Plane::Log_Write_Blackbox(void)
+{
+    const uint64_t now_us = AP_HAL::micros64();
+    // @LoggerMessage: BBX1
+    // @Description: BlackBox data1
+    // @Field: TimeUS: Time since system startup
+    // @Field: Lat: Latitude
+    // @Field: Lon: Longitude
+    // @Field: Alt: altitude above sea level
+    // @Field: Roll: euler roll
+    // @Field: Pitch: euler pitch
+    // @Field: Yaw: euler yaw
+    // @Field: VN: velocity north
+    // @Field: VE: velocity east
+    // @Field: VD: velocity down
+    Location loc;
+    Vector3f vel;
+    float alt;
+    if (!ahrs.get_location(loc) ||
+        !ahrs.get_velocity_NED(vel) ||
+        !loc.get_alt_m(Location::AltFrame::ABSOLUTE, alt)) {
+        return;
+    }
+
+    AP::logger().WriteStreaming("BBX1", "TimeUS,Lat,Lon,Alt,Roll,Pitch,Yaw,VN,VE,VD",
+                                "sDUmdddnnn",
+                                "FGG-------",
+                                "QLLfffffff",
+                                now_us,
+                                loc.lat, loc.lng, alt,
+                                degrees(ahrs.get_roll_rad()),
+                                degrees(ahrs.get_pitch_rad()),
+                                degrees(ahrs.get_yaw_rad()),
+                                vel.x, vel.y, vel.z);
+
+    // @LoggerMessage: BBX2
+    // @Description: BlackBox data2
+    // @Field: TimeUS: Time since system startup
+    // @Field: GyrX: X axis gyro
+    // @Field: GyrY: Y axis gyro
+    // @Field: GyrZ: Z axis gyro
+    // @Field: AccX: accel X axis (front)
+    // @Field: AccY: accel Y axis (right)
+    // @Field: AccZ: accel Z axis (down)
+    const auto &gyro = ahrs.get_gyro();
+    const auto &accel = ahrs.get_accel();
+    AP::logger().WriteStreaming("BBX2", "TimeUS,GyrX,GyrY,GyrZ,AccX,AccY,AccZ",
+                                "skkkooo",
+                                "F------",
+                                "Qffffff",
+                                now_us,
+                                degrees(gyro.x), degrees(gyro.y), degrees(gyro.z),
+                                accel.x, accel.y, accel.z);
+}
+#endif // AP_PLANE_BLACKBOX_LOGGING
 
 #endif // HAL_LOGGING_ENABLED

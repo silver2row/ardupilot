@@ -78,6 +78,7 @@ class TestBuildOptions(object):
         must_have_defines = {
             "CubeOrange": frozenset([
                 'AP_BARO_MS5611_ENABLED',
+                'AP_BARO_MS5607_ENABLED',
                 'AP_COMPASS_LSM303D_ENABLED',
                 'AP_COMPASS_AK8963_ENABLED',
                 'AP_COMPASS_AK09916_ENABLED',
@@ -85,6 +86,7 @@ class TestBuildOptions(object):
             ]),
             "CubeBlack": frozenset([
                 'AP_BARO_MS5611_ENABLED',
+                'AP_BARO_MS5607_ENABLED',
                 'AP_COMPASS_LSM303D_ENABLED',
                 'AP_COMPASS_AK8963_ENABLED',
                 'AP_COMPASS_AK09916_ENABLED',
@@ -235,6 +237,7 @@ class TestBuildOptions(object):
         # the following defines are known not to work on some
         # or all vehicles:
         feature_define_whitelist = set([
+            'AC_POLYFENCE_CIRCLE_INT_SUPPORT_ENABLED',  # no symbol
             'AP_RANGEFINDER_ENABLED',  # only at vehicle level ATM
             'HAL_PERIPH_SUPPORT_LONG_CAN_PRINTF',  # no symbol
             'AP_DRONECAN_VOLZ_FEEDBACK_ENABLED',  # broken, no subscriber
@@ -297,6 +300,7 @@ class TestBuildOptions(object):
             feature_define_whitelist.add('AP_COPTER_ADVANCED_FAILSAFE_ENABLED')
             feature_define_whitelist.add('AP_INERTIALSENSOR_FAST_SAMPLE_WINDOW_ENABLED')
             feature_define_whitelist.add('AP_COPTER_AHRS_AUTO_TRIM_ENABLED')
+            feature_define_whitelist.add('AP_RC_TRANSMITTER_TUNING_ENABLED')
 
         if target.lower() in ['antennatracker', 'blimp', 'sub', 'plane', 'copter']:
             # plane has a dependency for AP_Follow which is not
@@ -331,6 +335,7 @@ class TestBuildOptions(object):
             # only Plane and Copter instantiate Parachute
             feature_define_whitelist.add('HAL_PARACHUTE_ENABLED')
             # only Plane and Copter have AP_Motors:
+            feature_define_whitelist.add(r'AP_MOTORS_TRI_ENABLED')
 
         if target.lower() not in ["rover", "copter"]:
             # only Plane and Copter instantiate Beacon

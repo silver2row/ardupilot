@@ -10,6 +10,7 @@ if [ -z "$GITHUB_ACTIONS" ] || [ "$GITHUB_ACTIONS" != "true" ]; then
 fi
 
 if [ "$CI" = "true" ]; then
+  echo "::group::Build_ci.sh Setup"
   export PIP_ROOT_USER_ACTION=ignore
 fi
 
@@ -21,9 +22,15 @@ set -ex
 c_compiler=${CC:-gcc}
 cxx_compiler=${CXX:-g++}
 
+# we want processes to exit in CI.  If we don't end up calling
+# alarm_handler and not getting the binaries in the failure archive on
+# github.
+export SITL_PANIC_EXIT=1
+
 export BUILDROOT=/tmp/ci.build
 rm -rf $BUILDROOT
 export GIT_VERSION="abcdef"
+export GIT_VERSION_EXTENDED="0123456789abcdef"
 export GIT_VERSION_INT="15"
 export CHIBIOS_GIT_VERSION="12345667"
 export CCACHE_SLOPPINESS="include_file_ctime,include_file_mtime"
@@ -42,16 +49,29 @@ echo "Compiler: $c_compiler"
 pymavlink_installed=0
 mavproxy_installed=0
 
+if [ "$CI" = "true" ]; then
+  echo "::endgroup::"
+fi
+
 function install_pymavlink() {
+    if [ "$CI" = "true" ]; then
+      echo "::group::pymavlink install"
+    fi
     if [ $pymavlink_installed -eq 0 ]; then
         echo "Installing pymavlink"
         git submodule update --init --recursive --depth 1
         (cd modules/mavlink/pymavlink && python3 -m pip install --progress-bar off --cache-dir /tmp/pip-cache --user .)
         pymavlink_installed=1
     fi
+    if [ "$CI" = "true" ]; then
+      echo "::endgroup::"
+    fi
 }
 
 function install_mavproxy() {
+    if [ "$CI" = "true" ]; then
+      echo "::group::mavproxy install"
+    fi
     if [ $mavproxy_installed -eq 0 ]; then
         echo "Installing MAVProxy"
         pushd /tmp
@@ -64,15 +84,23 @@ function install_mavproxy() {
         # now uninstall the version of pymavlink pulled in by MAVProxy deps:
         python3 -m pip uninstall -y pymavlink --cache-dir /tmp/pip-cache
     fi
+    if [ "$CI" = "true" ]; then
+      echo "::endgroup::"
+    fi
 }
 
 function run_autotest() {
     NAME="$1"
     BVEHICLE="$2"
     RVEHICLE="$3"
-
+    if [ "$CI" = "true" ]; then
+      echo "::group::cpuinfo"
+    fi
     # report on what cpu's we have for later log review if needed
     cat /proc/cpuinfo
+    if [ "$CI" = "true" ]; then
+      echo "::endgroup::"
+    fi
 
     install_mavproxy
     install_pymavlink
@@ -149,6 +177,10 @@ for t in $CI_BUILD_TARGET; do
        run_autotest "Plane" "build.Plane" "test.PlaneTests1b"
         continue
     fi
+    if [ "$t" == "sitltest-plane-tests1c" ]; then
+       run_autotest "Plane" "build.Plane" "test.PlaneTests1c"
+        continue
+    fi
     if [ "$t" == "sitltest-quadplane" ]; then
         run_autotest "QuadPlane" "build.Plane" "test.QuadPlane"
         continue
@@ -156,6 +188,7 @@ for t in $CI_BUILD_TARGET; do
     if [ "$t" == "sitltest-rover" ]; then
         sudo apt-get update || /bin/true
         sudo apt-get install -y ppp || /bin/true
+        pppd --help # fail with `command not found` if ppp install failed
         run_autotest "Rover" "build.Rover" "test.Rover"
         continue
     fi
@@ -341,9 +374,9 @@ for t in $CI_BUILD_TARGET; do
         continue
     fi
 
-    if [ "$t" == "CubeRed-EKF2" ]; then
-        echo "Building CubeRed with EKF2 enabled"
-        $waf configure --board CubeRedPrimary --enable-EKF2
+    if [ "$t" == "CubeOrange-EKF2" ]; then
+        echo "Building CubeOrange with EKF2 enabled"
+        $waf configure --board CubeOrange --enable-EKF2
         $waf clean
         $waf copter
         continue
@@ -382,7 +415,7 @@ for t in $CI_BUILD_TARGET; do
     
     if [ "$t" == "dds-stm32h7" ]; then
         echo "Building with DDS support on a STM32H7"
-        $waf configure --board Durandal --enable-dds
+        $waf configure --board Durandal --enable-DDS
         $waf clean
         $waf copter
         $waf plane
@@ -391,7 +424,7 @@ for t in $CI_BUILD_TARGET; do
 
     if [ "$t" == "dds-sitl" ]; then
         echo "Building with DDS support on SITL"
-        $waf configure --board sitl --enable-dds
+        $waf configure --board sitl --enable-DDS
         $waf clean
         $waf copter
         $waf plane
@@ -488,6 +521,14 @@ for t in $CI_BUILD_TARGET; do
         if [ $? -ne 0 ]; then
             echo The code failed astyle cleanliness checks. Please run ./Tools/scripts/run_astyle.py
         fi
+        continue
+    fi
+
+    if [ "$t" == "param-file-validation" ]; then
+        echo "Testing param check script"
+        ./Tools/scripts/param_check_unittests.py
+        echo "Validating parameter files"
+        ./Tools/scripts/param_check_all.py
         continue
     fi
 

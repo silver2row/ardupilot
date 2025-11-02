@@ -40,6 +40,15 @@ uint32_t lua_scripts::loaded_checksum;
 uint32_t lua_scripts::running_checksum;
 HAL_Semaphore lua_scripts::crc_sem;
 
+// return string error message for error object at top of stack
+static const char *get_error_object_message(lua_State *L) {
+    const char *m = lua_tostring(L, -1);
+    if (!m) { // error object is not stringifiable
+        return "<error>";
+    }
+    return m;
+}
+
 lua_scripts::lua_scripts(const AP_Int32 &vm_steps, const AP_Int32 &heap_size, AP_Int8 &debug_options)
     : _vm_steps(vm_steps),
       _debug_options(debug_options)
@@ -122,7 +131,7 @@ void lua_scripts::set_and_print_new_error_message(MAV_SEVERITY severity, const c
 }
 
 int lua_scripts::atpanic(lua_State *L) {
-    set_and_print_new_error_message(MAV_SEVERITY_CRITICAL, "Panic: %s", lua_tostring(L, -1));
+    set_and_print_new_error_message(MAV_SEVERITY_CRITICAL, "Panic: %s", get_error_object_message(L));
     longjmp(panic_jmp, 1);
     return 0;
 }
@@ -161,7 +170,7 @@ lua_scripts::script_info *lua_scripts::load_script(lua_State *L, char *filename)
     if (int error = luaL_loadfile(L, filename)) {
         switch (error) {
             case LUA_ERRSYNTAX:
-                set_and_print_new_error_message(MAV_SEVERITY_CRITICAL, "Error: %s", lua_tostring(L, -1));
+                set_and_print_new_error_message(MAV_SEVERITY_CRITICAL, "Error: %s", get_error_object_message(L));
                 lua_pop(L, lua_gettop(L));
                 return nullptr;
             case LUA_ERRMEM:
@@ -169,7 +178,7 @@ lua_scripts::script_info *lua_scripts::load_script(lua_State *L, char *filename)
                 lua_pop(L, lua_gettop(L));
                 return nullptr;
             case LUA_ERRFILE:
-                set_and_print_new_error_message(MAV_SEVERITY_CRITICAL, "Unable to load the file: %s", lua_tostring(L, -1));
+                set_and_print_new_error_message(MAV_SEVERITY_CRITICAL, "Unable to load the file: %s", get_error_object_message(L));
                 lua_pop(L, lua_gettop(L));
                 return nullptr;
             default:
@@ -241,9 +250,6 @@ void lua_scripts::create_sandbox(lua_State *L) {
     lua_settable(L, -3);
     lua_pushstring(L, "io");
     luaopen_io(L);
-    lua_settable(L, -3);
-    lua_pushstring(L, "utf8");
-    luaopen_utf8(L);
     lua_settable(L, -3);
     lua_pushstring(L, "package");
     luaopen_package(L);
@@ -340,7 +346,7 @@ void lua_scripts::run_next_script(lua_State *L) {
             // script has consumed an excessive amount of CPU time
             set_and_print_new_error_message(MAV_SEVERITY_CRITICAL, "%s exceeded time limit", script->name);
         } else {
-            set_and_print_new_error_message(MAV_SEVERITY_CRITICAL, "%s", lua_tostring(L, -1));
+            set_and_print_new_error_message(MAV_SEVERITY_CRITICAL, "%s", get_error_object_message(L));
         }
         remove_script(L, script);
         lua_pop(L, 1);
@@ -513,10 +519,11 @@ void lua_scripts::run(void) {
     lua_setmetatable(L, -2);  /* set table as metatable for strings */
     lua_pop(L, 1);  /* pop dummy string */
 
-#ifndef HAL_CONSOLE_DISABLED
-    const int loaded_mem = lua_gc(L, LUA_GCCOUNT, 0) * 1024 + lua_gc(L, LUA_GCCOUNTB, 0);
-    DEV_PRINTF("Lua: State memory usage: %i + %i\n", inital_mem, loaded_mem - inital_mem);
-#endif
+    if (option_is_set(AP_Scripting::DebugOption::RUNTIME_MSG)) {
+        const int loaded_mem = lua_gc(L, LUA_GCCOUNT, 0) * 1024 + lua_gc(L, LUA_GCCOUNTB, 0);
+        GCS_SEND_TEXT(MAV_SEVERITY_DEBUG, "Lua: State memory usage: %i + %i\n",
+            inital_mem, loaded_mem - inital_mem);
+    }
 
     // Scan the filesystem in an appropriate manner and autostart scripts
     // Skip those directores disabled with SCR_DIR_DISABLE param

@@ -51,6 +51,10 @@ bool AP_Arming_Plane::pre_arm_checks(bool display_failure)
         // then skip the checks
         return true;
     }
+    if (!hal.scheduler->is_system_initialized()) {
+        check_failed(display_failure, "System not initialised");
+        return false;
+    }
     //are arming checks disabled?
     if (checks_to_perform == 0) {
         return mandatory_checks(display_failure);
@@ -70,11 +74,6 @@ bool AP_Arming_Plane::pre_arm_checks(bool display_failure)
     // Check airspeed sensor
     ret &= AP_Arming::airspeed_checks(display_failure);
 #endif
-
-    if (plane.g.fs_timeout_long < plane.g.fs_timeout_short && plane.g.fs_action_short != FS_ACTION_SHORT_DISABLED) {
-        check_failed(display_failure, "FS_LONG_TIMEOUT < FS_SHORT_TIMEOUT");
-        ret = false;
-    }
 
     if (plane.aparm.roll_limit < 3) {
         check_failed(display_failure, "ROLL_LIMIT_DEG too small (%.1f)", plane.aparm.roll_limit.get());
@@ -97,7 +96,7 @@ bool AP_Arming_Plane::pre_arm_checks(bool display_failure)
     }
 
     if (plane.channel_throttle->get_reverse() && 
-        Plane::ThrFailsafe(plane.g.throttle_fs_enabled.get()) != Plane::ThrFailsafe::Disabled &&
+        plane.g.throttle_fs_enabled != Plane::ThrFailsafe::Disabled &&
         plane.g.throttle_fs_value < 
         plane.channel_throttle->get_radio_max()) {
         check_failed(display_failure, "Invalid THR_FS_VALUE for rev throttle");
@@ -250,24 +249,6 @@ bool AP_Arming_Plane::ins_checks(bool display_failure)
 
 bool AP_Arming_Plane::arm_checks(AP_Arming::Method method)
 {
-    if (method == AP_Arming::Method::RUDDER) {
-        const AP_Arming::RudderArming arming_rudder = get_rudder_arming_type();
-
-        if (arming_rudder == AP_Arming::RudderArming::IS_DISABLED) {
-            //parameter disallows rudder arming/disabling
-
-            // if we emit a message here then someone doing surface
-            // checks may be bothered by the message being emitted.
-            // check_failed(true, "Rudder arming disabled");
-            return false;
-        }
-
-        // if throttle is not down, then pilot cannot rudder arm/disarm
-        if (!is_zero(plane.get_throttle_input())){
-            check_failed(true, "Non-zero throttle");
-            return false;
-        }
-    }
 
     //are arming checks disabled?
     if (checks_to_perform == 0) {
@@ -325,6 +306,12 @@ bool AP_Arming_Plane::arm(const AP_Arming::Method method, const bool do_arming_c
     plane.mode_autoland.arm_check();
 #endif
 
+    if (method == AP_Arming::Method::RUDDER) {
+        // initialise the timer used to warn the user they're holding
+        // their stick over:
+        plane.takeoff_state.rudder_takeoff_warn_ms = AP_HAL::millis();
+    }
+
     send_arm_disarm_statustext("Throttle armed");
 
     return true;
@@ -340,14 +327,6 @@ bool AP_Arming_Plane::disarm(const AP_Arming::Method method, bool do_disarm_chec
          method == AP_Arming::Method::RUDDER)) {
         if (plane.is_flying()) {
             // don't allow mavlink or rudder disarm while flying
-            return false;
-        }
-    }
-    
-    if (do_disarm_checks && method == AP_Arming::Method::RUDDER) {
-        // option must be enabled:
-        if (get_rudder_arming_type() != AP_Arming::RudderArming::ARMDISARM) {
-            gcs().send_text(MAV_SEVERITY_INFO, "Rudder disarm: disabled");
             return false;
         }
     }
@@ -464,7 +443,7 @@ bool AP_Arming_Plane::mission_checks(bool report)
                 const float dist = cmd.content.location.get_distance(prev_cmd.content.location);
                 const float tecs_land_speed = plane.TECS_controller.get_land_airspeed();
                 const float landing_speed = is_positive(tecs_land_speed)?tecs_land_speed:plane.aparm.airspeed_cruise;
-                const float min_dist = 0.75 * plane.quadplane.stopping_distance(sq(landing_speed));
+                const float min_dist = 0.75 * plane.quadplane.stopping_distance_m(sq(landing_speed));
                 if (dist < min_dist) {
                     ret = false;
                     check_failed(Check::MISSION, report, "VTOL land too short, min %.0fm", min_dist);
@@ -486,7 +465,7 @@ bool AP_Arming_Plane::rc_received_if_enabled_check(bool display_failure)
     }
 
     // If RC failsafe is enabled we must receive RC before arming
-    if ((Plane::ThrFailsafe(plane.g.throttle_fs_enabled.get()) == Plane::ThrFailsafe::Enabled) && 
+    if ((plane.g.throttle_fs_enabled == Plane::ThrFailsafe::Enabled) &&
         !(rc().has_had_rc_receiver() || rc().has_had_rc_override())) {
         check_failed(display_failure, "Waiting for RC");
         return false;

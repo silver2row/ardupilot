@@ -1,4 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
+# flake8: noqa
 
 """
 script to run configure for all hwdef.dat, to check for syntax errors
@@ -70,7 +72,7 @@ if args.start is not None:
 
 def is_ap_periph(board):
     hwdef = os.path.join('libraries/AP_HAL_ChibiOS/hwdef/%s/hwdef.dat' % board)
-    ch = chibios_hwdef.ChibiOSHWDef(hwdef)
+    ch = chibios_hwdef.ChibiOSHWDef(hwdef=[hwdef], quiet=True)
     ch.process_hwdefs()
     return ch.is_periph_fw()
 

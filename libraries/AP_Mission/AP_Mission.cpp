@@ -916,6 +916,12 @@ bool AP_Mission::stored_in_location(uint16_t id)
     case MAV_CMD_NAV_VTOL_TAKEOFF:
     case MAV_CMD_NAV_VTOL_LAND:
     case MAV_CMD_NAV_PAYLOAD_PLACE:
+    case MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION:
+    case MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION:
+    case MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION:
+    case MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION:
+    case MAV_CMD_NAV_FENCE_RETURN_POINT:
+    case MAV_CMD_NAV_RALLY_POINT:
         return true;
     default:
         return false;
@@ -3099,7 +3105,7 @@ bool AP_Mission::calc_rewind_pos(Mission_Command& rewind_cmd)
 
     // calculate the resume wp position
     rewind_cmd.content.location.offset(dist_vec.x * leg_percent, dist_vec.y * leg_percent);
-    rewind_cmd.content.location.alt -= dist_vec.z * leg_percent * 100; //(cm)
+    rewind_cmd.content.location.offset_up_m(-dist_vec.z * leg_percent);
 
     // The rewind_cmd.index has the index of the 'last passed wp' from the history array.  This ensures that the mission order
     // continues as planned without further intervention.  The resume wp is not written to memory so will not perminantely change the mission.

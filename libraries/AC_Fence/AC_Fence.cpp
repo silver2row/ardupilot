@@ -67,11 +67,11 @@ const AP_Param::GroupInfo AC_Fence::var_info[] = {
     // @DisplayName: Fence Action
     // @Description: What action should be taken when fence is breached
     // @Values{Copter}: 0:Report Only,1:RTL or Land,2:Always Land,3:SmartRTL or RTL or Land,4:Brake or Land,5:SmartRTL or Land
-    // @Values{Rover}: 0:Report Only,1:RTL or Hold,2:Hold,3:SmartRTL or RTL or Hold,4:SmartRTL or Hold
+    // @Values{Rover}: 0:Report Only,1:RTL or Hold,2:Hold,3:SmartRTL or RTL or Hold,4:SmartRTL or Hold,5:Terminate,6:Loiter or Hold
     // @Values{Plane}: 0:Report Only,1:RTL,6:Guided,7:GuidedThrottlePass,8:AUTOLAND if possible else RTL
     // @Values: 0:Report Only,1:RTL or Land
     // @User: Standard
-    AP_GROUPINFO("ACTION",      2,  AC_Fence,   _action,        AC_FENCE_ACTION_RTL_AND_LAND),
+    AP_GROUPINFO("ACTION",      2,  AC_Fence,   _action,        float(Action::RTL_AND_LAND)),
 
     // @Param{Copter, Plane, Sub}: ALT_MAX
     // @DisplayName: Fence Maximum Altitude
@@ -155,6 +155,14 @@ const AP_Param::GroupInfo AC_Fence::var_info[] = {
     // @Units: Hz
     // @User: Advanced
     AP_GROUPINFO("NTF_FREQ", 12, AC_Fence, _notify_freq, static_cast<float>(AC_FENCE_NOTIFY_DEFAULT)),
+
+    // @Param: MARGIN_XY
+    // @DisplayName: Fence Horizontal Margin
+    // @Description: Distance that autopilot's should maintain from the fence in the horizontal plane to avoid a breach. If set to 0 then FENCE_MARGIN is used.
+    // @Units: m
+    // @Range: 0 50
+    // @User: Standard
+    AP_GROUPINFO("MARGIN_XY", 13,  AC_Fence,   _margin_xy, 0),
 
     AP_GROUPEND
 };
@@ -390,6 +398,12 @@ uint8_t AC_Fence::get_enabled_fences() const
     return _enabled_fences & present();
 }
 
+/// get_horizontal_margin - returns the fence margin in meters
+float AC_Fence::get_horizontal_margin() const
+{
+    return is_positive(_margin_xy.get()) ? _margin_xy.get() : _margin.get();
+}
+
 // additional checks for the polygon fence:
 bool AC_Fence::pre_arm_check_polygon(char *failure_msg, const uint8_t failure_msg_len) const
 {
@@ -403,7 +417,7 @@ bool AC_Fence::pre_arm_check_polygon(char *failure_msg, const uint8_t failure_ms
         return false;
     }
 
-    if (!_poly_loader.check_inclusion_circle_margin(_margin)) {
+    if (!_poly_loader.check_inclusion_circle_margin(get_horizontal_margin())) {
         hal.util->snprintf(failure_msg, failure_msg_len, "Polygon fence margin is greater than inclusion circle radius");
         return false;
     }
@@ -418,7 +432,7 @@ bool AC_Fence::pre_arm_check_circle(char *failure_msg, const uint8_t failure_msg
         hal.util->snprintf(failure_msg, failure_msg_len, "Invalid Circle FENCE_RADIUS value");
         return false;
     }
-    if (_circle_radius < _margin) {
+    if (_circle_radius < get_horizontal_margin()) {
         hal.util->snprintf(failure_msg, failure_msg_len, "Circle FENCE_MARGIN is greater than FENCE_RADIUS");
         return false;
     }
@@ -517,6 +531,11 @@ bool AC_Fence::pre_arm_check(char *failure_msg, const uint8_t failure_msg_len) c
         return false;
     }
 
+    if (_margin_xy < 0.0f) {
+        hal.util->snprintf(failure_msg, failure_msg_len, "Invalid FENCE_MARGIN_XY value");
+        return false;
+    }
+
     if (_alt_max < _alt_min) {
         hal.util->snprintf(failure_msg, failure_msg_len, "FENCE_ALT_MAX < FENCE_ALT_MIN");
         return false;
@@ -565,7 +584,7 @@ bool AC_Fence::check_fence_alt_max()
         }
         // old breach
         return false;
-    } else if (_curr_alt >= _alt_max - _margin) {
+    } else if (_curr_alt >= get_safe_alt_max()) {
         record_margin_breach(AC_FENCE_TYPE_ALT_MAX);
     } else {
         clear_margin_breach(AC_FENCE_TYPE_ALT_MAX);
@@ -618,7 +637,7 @@ bool AC_Fence::check_fence_alt_min()
         }
         // old breach
         return false;
-    } else if (_curr_alt <= _alt_min + _margin) {
+    } else if (_curr_alt <= get_safe_alt_min()) {
         record_margin_breach(AC_FENCE_TYPE_ALT_MIN);
     } else {
         clear_margin_breach(AC_FENCE_TYPE_ALT_MIN);
@@ -654,7 +673,7 @@ bool AC_Fence::auto_enable_fence_floor()
     const float _curr_alt = -alt; // translate Down to Up
 
     // check if we are over the altitude fence
-    if (!floor_enabled() && _curr_alt >= _alt_min + _margin) {
+    if (!floor_enabled() && _curr_alt >= get_safe_alt_min()) {
         enable(true, AC_FENCE_TYPE_ALT_MIN, false);
         GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "Min Alt fence enabled (auto enable)");
         return true;
@@ -685,8 +704,7 @@ bool AC_Fence::check_fence_polygon()
             return true;
         }
         return false;
-    } else if (option_enabled(OPTIONS::NOTIFY_MARGIN_BREACH)
-               && _polygon_breach_distance < 0 && fabsf(_polygon_breach_distance) < _margin) {
+    } else if (_polygon_breach_distance < 0 && fabsf(_polygon_breach_distance) < get_horizontal_margin()) {
         record_margin_breach(AC_FENCE_TYPE_POLYGON);
     } else {
         clear_margin_breach(AC_FENCE_TYPE_POLYGON);
@@ -731,7 +749,7 @@ bool AC_Fence::check_fence_circle()
             return true;
         }
         return false;
-    } else if (_home_distance >= _circle_radius - _margin) {
+    } else if (_home_distance >= _circle_radius - get_horizontal_margin()) {
         record_margin_breach(AC_FENCE_TYPE_CIRCLE);
     } else {
         clear_margin_breach(AC_FENCE_TYPE_CIRCLE);
@@ -760,6 +778,10 @@ uint8_t AC_Fence::check(bool disable_auto_fences)
     clear_breach(~_configured_fences);
     // clear any breach from disabled fences
     clear_breach(fences_to_disable);
+    // clear any margin breach from a non-enabled fence
+    clear_margin_breach(~_configured_fences);
+    // clear any marginbreach from disabled fences
+    clear_margin_breach(fences_to_disable);
 
     if (_min_alt_state == MinAltState::MANUALLY_ENABLED) {
         // if user has manually enabled the min-alt fence then don't auto-disable
@@ -780,6 +802,15 @@ uint8_t AC_Fence::check(bool disable_auto_fences)
         float alt;
         AP::ahrs().get_relative_position_D_home(alt);
 
+        // @LoggerMessage: FENC
+        // @Description: Fence status - development diagnostic message
+        // @Field: TimeUS: Time since system startup
+        // @Field: EN: bitmask of enabled fences
+        // @Field: AE: bitmask of automatically enabled fences
+        // @Field: CF: bitmask of configured-in-parameters fences
+        // @Field: EF: bitmask of enabled fences
+        // @Field: DF: bitmask of currently disabled fences
+        // @Field: Alt: current vehicle altitude
         AP::logger().WriteStreaming("FENC", "TimeUS,EN,AE,CF,EF,DF,Alt", "QIIIIIf",
                                     AP_HAL::micros64(),
                                     enabled(),
@@ -970,6 +1001,7 @@ void AC_Fence::clear_margin_breach(uint8_t fence_type)
 /// of the given fences.  fence_type is a bitmask here.
 float AC_Fence::get_breach_distance(uint8_t fence_type) const
 {
+    fence_type = fence_type & present();
     float max = -FLT_MAX;
 
     if (fence_type & AC_FENCE_TYPE_ALT_MAX) {
@@ -1013,7 +1045,7 @@ bool AC_Fence::sys_status_enabled() const
     if (!sys_status_present()) {
         return false;
     }
-    if (_action == AC_FENCE_ACTION_REPORT_ONLY) {
+    if (_action == Action::REPORT_ONLY) {
         return false;
     }
     // Fence is only enabled when the flag is enabled

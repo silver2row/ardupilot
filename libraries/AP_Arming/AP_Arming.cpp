@@ -59,6 +59,7 @@
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <AP_KDECAN/AP_KDECAN.h>
 #include <AP_Vehicle/AP_Vehicle.h>
+#include <AP_ICEngine/AP_ICEngine.h>
 
 #if HAL_MAX_CAN_PROTOCOL_DRIVERS
   #include <AP_CANManager/AP_CANManager.h>
@@ -115,8 +116,10 @@ const AP_Param::GroupInfo AP_Arming::var_info[] = {
 
     // @Param{Plane, Rover}: REQUIRE
     // @DisplayName: Require Arming Motors 
-    // @Description: Arming disabled until some requirements are met. If 0, there are no requirements (arm immediately).  If 1, sends the minimum throttle PWM value to the throttle channel when disarmed. If 2, send 0 PWM (no signal) to throttle channel when disarmed. On planes with ICE enabled and the throttle while disarmed option set in ICE_OPTIONS, the motor will always get THR_MIN when disarmed. Arming will occur using either rudder stick arming (if enabled) or GCS command when all mandatory and ARMING_CHECK items are satisfied. Note, when setting this parameter to 0, a reboot is required to immediately arm the plane.
-    // @Values: 0:Disabled,1:minimum PWM when disarmed,2:0 PWM when disarmed
+    // @Description{Plane}: Arming disabled until some requirements are met. If 0, there are no requirements (arm immediately).  If 1, sends the minimum throttle PWM value to the throttle channel when disarmed. If 2, send 0 PWM (no signal) to throttle channel when disarmed. On planes with ICE enabled and the throttle while disarmed option set in ICE_OPTIONS, the motor will always get THR_MIN when disarmed. Arming will be blocked until all mandatory and ARMING_CHECK items are satisfied; arming can then be accomplished via (eg.) rudder gesture or GCS command.
+    // @Description{Rover}: Arming disabled until some requirements are met. If 0, there are no requirements (arm immediately).  If 1, all checks specified by ARMING_CHECKS must pass before the vehicle can be armed (for example, via rudder stick or GCS command).  If 3, Arm immediately once pre-arm/arm checks are satisfied, but only one time per boot up.  Note that a reboot is NOT required when setting to 0 but IS require when setting to 3.
+    // @Values{Plane}: 0:Disabled,1:Yes(minimum PWM when disarmed),2:Yes(0 PWM when disarmed)
+    // @Values{Rover}: 0:No,1:Yes(minimum PWM when disarmed),3:No(AutoArmOnce after checks are passed)
     // @User: Advanced
     AP_GROUPINFO_FLAGS_FRAME("REQUIRE",     0,      AP_Arming,  require, float(Required::YES_MIN_PWM),
                              AP_PARAM_FLAG_NO_SHIFT,
@@ -165,7 +168,7 @@ const AP_Param::GroupInfo AP_Arming::var_info[] = {
     // @Param: OPTIONS
     // @DisplayName: Arming options
     // @Description: Options that can be applied to change arming behaviour
-    // @Bitmask: 0:Disable prearm display,1:Do not send status text on state change
+    // @Bitmask: 0:Disable prearm display,1:Do not send status text on state change,2:Skip IMU consistency checks when ICE motor running
     // @User: Advanced
     AP_GROUPINFO("OPTIONS", 9,   AP_Arming, _arming_options, 0),
 
@@ -486,16 +489,34 @@ bool AP_Arming::ins_checks(bool report)
             return false;
         }
 
-        // check all accelerometers point in roughly same direction
-        if (!ins_accels_consistent(ins)) {
-            check_failed(Check::INS, report, "Accels inconsistent");
-            return false;
+        bool run_imu_consistency_check = true;
+#if AP_ICENGINE_ENABLED
+        if (option_enabled(Option::SKIP_IMU_CONSISTENCY_ICE_RUNNING)) {
+            // ICE motors can greatly disturb the IMU, so we get arming failures
+            // due to gyro (and sometimes accel) inconsistency. Allow this check to be
+            // disabled while the motor is running
+            auto ice = AP::ice();
+            if (ice != nullptr) {
+                const auto ice_state = ice->get_state();
+                if (ice_state == AP_ICEngine::ICE_STARTING || ice_state == AP_ICEngine::ICE_RUNNING) {
+                    run_imu_consistency_check = false;
+                }
+            }
         }
+#endif
 
-        // check all gyros are giving consistent readings
-        if (!ins_gyros_consistent(ins)) {
-            check_failed(Check::INS, report, "Gyros inconsistent");
-            return false;
+        if (run_imu_consistency_check) {
+            // check all accelerometers point in roughly same direction
+            if (!ins_accels_consistent(ins)) {
+                check_failed(Check::INS, report, "Accels inconsistent");
+                return false;
+            }
+
+            // check all gyros are giving consistent readings
+            if (!ins_gyros_consistent(ins)) {
+                check_failed(Check::INS, report, "Gyros inconsistent");
+                return false;
+            }
         }
 
         // no arming while doing temp cal
@@ -1191,8 +1212,7 @@ bool AP_Arming::terrain_checks(bool report) const
 
     const AP_Terrain *terrain = AP_Terrain::get_singleton();
     if (terrain == nullptr) {
-        // this is also a system error, and it is already complaining
-        // about it.
+        check_failed(Check::PARAMETERS, report, "terrain disabled");
         return false;
     }
 
@@ -1579,6 +1599,11 @@ bool AP_Arming::serial_protocol_checks(bool display_failure)
        check_failed(display_failure, "Multiple SERIAL ports configured for RC input");
        return false;
     }
+    char failure_msg[100] = {};
+    if (!AP::serialmanager().pre_arm_checks(failure_msg, ARRAY_SIZE(failure_msg))) {
+        check_failed(display_failure, "%s", failure_msg);
+        return false;
+    }
     return true;
 }
 
@@ -1770,7 +1795,7 @@ bool AP_Arming::crashdump_checks(bool report)
         return true;
     }
 
-    check_failed(Check::PARAMETERS, true, "CrashDump data detected");
+    check_failed(Check::PARAMETERS, report, "CrashDump data detected");
 
     return false;
 }
@@ -1792,6 +1817,17 @@ bool AP_Arming::arm(AP_Arming::Method method, const bool do_arming_checks)
 {
     if (armed) { //already armed
         return false;
+    }
+
+    if (method == Method::RUDDER) {
+        switch (get_rudder_arming_type()) {
+        case AP_Arming::RudderArming::IS_DISABLED:
+            //parameter disallows rudder arming/disabling
+            return false;
+        case AP_Arming::RudderArming::ARMONLY:
+        case AP_Arming::RudderArming::ARMDISARM:
+            break;
+        }
     }
 
     running_arming_checks = true;  // so we show Arm: rather than Disarm: in messages
@@ -1857,6 +1893,17 @@ bool AP_Arming::disarm(const AP_Arming::Method method, bool do_disarm_checks)
 {
     if (!armed) { // already disarmed
         return false;
+    }
+    if (method == AP_Arming::Method::RUDDER) {
+        // if throttle is not down, then pilot cannot rudder arm/disarm
+        if (rc().get_throttle_channel().get_control_in() > 0) {
+            return false;
+        }
+        // option must be enabled:
+        if (get_rudder_arming_type() != AP_Arming::RudderArming::ARMDISARM) {
+            gcs().send_text(MAV_SEVERITY_INFO, "Disarm: rudder disarm disabled");
+            return false;
+        }
     }
     armed = false;
     _last_disarm_method = method;
@@ -2050,6 +2097,7 @@ void AP_Arming::check_forced_logging(const AP_Arming::Method method)
             return;
 
         case Method::RUDDER:
+        case Method::TOYMODE:
         case Method::MAVLINK:
         case Method::AUXSWITCH:
         case Method::MOTORTEST:
@@ -2065,6 +2113,8 @@ void AP_Arming::check_forced_logging(const AP_Arming::Method method)
         case Method::TOYMODELANDFORCE:
         case Method::LANDING:
         case Method::DDS:
+        case Method::AUTO_ARM_ONCE:
+        case Method::TURTLE_MODE:
         case Method::UNKNOWN:
             AP::logger().set_long_log_persist(false);
             return;
