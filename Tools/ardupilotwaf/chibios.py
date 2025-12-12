@@ -58,7 +58,6 @@ def ch_dynamic_env(self):
 
     if not _dynamic_env_data:
         _load_dynamic_env_data(self.bld)
-    self.use += ' ch'
     self.env.append_value('INCLUDES', _dynamic_env_data['include_dirs'])
 
 
@@ -173,7 +172,10 @@ class generate_bin(Task.Task):
                 return ret
             return ret
         else:
-            cmd = [self.env.get_flat('OBJCOPY'), '-O', 'binary', self.inputs[0].relpath(),  self.outputs[0].relpath()]
+            # use --gap-fill 0xFF so gaps match erased flash, avoiding CRC
+            # mismatch when loading via GDB vs bootloader/DroneCAN
+            cmd = [self.env.get_flat('OBJCOPY'), '-O', 'binary', '--gap-fill', '0xFF',
+                   self.inputs[0].relpath(), self.outputs[0].relpath()]
             self.exec_command(cmd)
 
     '''list sections and split into two binaries based on section's location in internal, external or in ram'''
@@ -219,8 +221,10 @@ class generate_bin(Task.Task):
         else:
             Logs.error("Couldn't find .text section")
         # create intf binary
+        # use --gap-fill 0xFF so gaps match erased flash, avoiding CRC
+        # mismatch when loading via GDB vs bootloader/DroneCAN
         if len(intf_sections):
-            cmd = "'{}' {} -O binary {} {}".format(self.env.get_flat('OBJCOPY'),
+            cmd = "'{}' {} --gap-fill 0xFF -O binary {} {}".format(self.env.get_flat('OBJCOPY'),
                                                 ' '.join(intf_sections), self.inputs[0].relpath(), self.outputs[0].relpath())
         else:
             cmd = "cp /dev/null {}".format(self.outputs[0].relpath())
@@ -228,7 +232,7 @@ class generate_bin(Task.Task):
         if (ret < 0):
             return ret
         # create extf binary
-        cmd = "'{}' {} -O binary {} {}".format(self.env.get_flat('OBJCOPY'),
+        cmd = "'{}' {} --gap-fill 0xFF -O binary {} {}".format(self.env.get_flat('OBJCOPY'),
                                                 ' '.join(extf_sections), self.inputs[0].relpath(), self.outputs[1].relpath())
         return self.exec_command(cmd)
 
@@ -514,32 +518,6 @@ def setup_canperiph_build(cfg):
 
     cfg.get_board().with_can = True
 
-def load_env_vars_handle_kv_pair(env, kv_pair):
-    '''handle a key/value pair out of the hwdef generator'''
-    (k, v) = kv_pair
-    if k == 'ROMFS_FILES':
-        env.ROMFS_FILES += v
-        return
-    hal_common.load_env_vars_handle_kv_pair(env, kv_pair)
-
-def load_env_vars(env, hwdef_env):
-    '''load environment variables from the hwdef generator'''
-    hal_common.load_env_vars(env, hwdef_env, kv_handler=load_env_vars_handle_kv_pair)
-
-    if env.DEBUG or env.DEBUG_SYMBOLS:
-        env.CHIBIOS_BUILD_FLAGS += ' ENABLE_DEBUG_SYMBOLS=yes'
-    if env.ENABLE_ASSERTS:
-        env.CHIBIOS_BUILD_FLAGS += ' ENABLE_ASSERTS=yes'
-    if env.ENABLE_MALLOC_GUARD:
-        env.CHIBIOS_BUILD_FLAGS += ' ENABLE_MALLOC_GUARD=yes'
-    if env.ENABLE_STATS:
-        env.CHIBIOS_BUILD_FLAGS += ' ENABLE_STATS=yes'
-    if env.ENABLE_DFU_BOOT and env.BOOTLOADER:
-        env.CHIBIOS_BUILD_FLAGS += ' USE_ASXOPT=-DCRT0_ENTRY_HOOK=TRUE'
-    if env.AP_BOARD_START_TIME:
-        env.CHIBIOS_BUILD_FLAGS += ' AP_BOARD_START_TIME=0x%x' % env.AP_BOARD_START_TIME
-
-
 def setup_optimization(env):
     '''setup optimization flags for build'''
     if env.DEBUG:
@@ -601,12 +579,24 @@ def configure(cfg):
         env.DEFAULT_PARAMETERS = cfg.options.default_parameters
 
     try:
-        hwdef_env, hwdef_files = generate_hwdef_h(env)
+        hwdef_obj = generate_hwdef_h(env)
     except Exception:
         traceback.print_exc()
         cfg.fatal("Failed to process hwdef.dat")
-    load_env_vars(cfg.env, hwdef_env)
-    hal_common.handle_hwdef_files(cfg, hwdef_files)
+    hal_common.process_hwdef_results(cfg, hwdef_obj)
+
+    if env.DEBUG or env.DEBUG_SYMBOLS:
+        env.CHIBIOS_BUILD_FLAGS += ' ENABLE_DEBUG_SYMBOLS=yes'
+    if env.ENABLE_ASSERTS:
+        env.CHIBIOS_BUILD_FLAGS += ' ENABLE_ASSERTS=yes'
+    if env.ENABLE_MALLOC_GUARD:
+        env.CHIBIOS_BUILD_FLAGS += ' ENABLE_MALLOC_GUARD=yes'
+    if env.ENABLE_STATS:
+        env.CHIBIOS_BUILD_FLAGS += ' ENABLE_STATS=yes'
+    if env.ENABLE_DFU_BOOT and env.BOOTLOADER:
+        env.CHIBIOS_BUILD_FLAGS += ' USE_ASXOPT=-DCRT0_ENTRY_HOOK=TRUE'
+    if env.AP_BOARD_START_TIME:
+        env.CHIBIOS_BUILD_FLAGS += ' AP_BOARD_START_TIME=0x%x' % env.AP_BOARD_START_TIME
 
     if env.HAL_NUM_CAN_IFACES and not env.AP_PERIPH:
         setup_canmgr_build(cfg)
@@ -639,7 +629,7 @@ def generate_hwdef_h(env):
     if env.HWDEF_EXTRA:
         hwdef.append(env.HWDEF_EXTRA)
 
-    c = chibios_hwdef.ChibiOSHWDef(
+    hwdef_obj = chibios_hwdef.ChibiOSHWDef(
         outdir=hwdef_out,
         bootloader=bootloader_flag,
         signed_fw=bool(env.AP_SIGNED_FIRMWARE),
@@ -649,8 +639,9 @@ def generate_hwdef_h(env):
         default_params_filepath=str(env.DEFAULT_PARAMETERS),
         quiet=False,
     )
-    c.run()
-    return c.env_vars, c.output_files
+    hwdef_obj.run()
+
+    return hwdef_obj
 
 def pre_build(bld):
     '''pre-build hook to change dynamic sources'''

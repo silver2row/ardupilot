@@ -47,7 +47,6 @@ class Board:
 
     def configure(self, cfg):
         cfg.env.TOOLCHAIN = cfg.options.toolchain or self.toolchain
-        cfg.env.ROMFS_FILES = []
         if hasattr(self,'configure_toolchain'):
             self.configure_toolchain(cfg)
         else:
@@ -332,6 +331,7 @@ class Board:
                 '-Werror=implicit-fallthrough',
                 '-cl-single-precision-constant',
                 '-Wno-vla-extension',
+                '-ftrapping-math',  # prevent re-ordering of sanity checks
             ]
         else:
             env.CFLAGS += [
@@ -423,6 +423,7 @@ class Board:
             '-Warray-bounds',
         ]
 
+        use_prefix_map = False
         if 'clang++' in cfg.env.COMPILER_CXX:
             env.CXXFLAGS += [
                 '-fcolor-diagnostics',
@@ -452,7 +453,10 @@ class Board:
                 '-Wno-gnu-variable-sized-type-not-at-end',
                 '-Werror=implicit-fallthrough',
                 '-cl-single-precision-constant',
+                '-ftrapping-math',  # prevent re-ordering of sanity checks
             ]
+            if self.cc_version_gte(cfg, 10, 0):
+                use_prefix_map = True
         else:
             env.CXXFLAGS += [
                 '-Wno-format-contains-nul',
@@ -470,6 +474,8 @@ class Board:
                     '-Werror=maybe-uninitialized',
                     '-Werror=duplicated-cond',
                 ]
+            if self.cc_version_gte(cfg, 8, 0):
+                use_prefix_map = True
             if self.cc_version_gte(cfg, 8, 4):
                 env.CXXFLAGS += [
                     '-Werror=sizeof-pointer-div',
@@ -481,6 +487,28 @@ class Board:
                 env.CFLAGS += [
                     '-Werror=use-after-free',
                 ]
+
+        if cfg.env.TOOLCHAIN == "custom":
+            # the QURT board stuff should be extracting the compiler
+            # version properly.  In the meantime, here's a really
+            # awesome thing:
+            use_prefix_map = False
+
+        if use_prefix_map:
+            # fixes to make __FILE__ and debug paths repeatable in .elf/.bin
+
+            # build root including variant (e.g. by default build/sitl)
+            bldnode = cfg.bldnode.make_node(cfg.variant)
+            # compute source root path from the perspective of the exact build
+            # root above. this path is (as far as we can tell) what waf
+            # prefixes source files with when passing them to the compiler
+            file_prefix = str(cfg.srcnode.path_from(bldnode))
+
+            # now tell the compiler to remap that prefix to `../..` (the prefix
+            # by default) so any stored source paths are independent of
+            # wherever the build dir is and the debugger can find the source
+            cfg.env.CFLAGS += [f"-ffile-prefix-map={file_prefix}=../.."]
+            cfg.env.CXXFLAGS += [f"-ffile-prefix-map={file_prefix}=../.."]
 
         if cfg.options.Werror:
             errors = ['-Werror',
@@ -555,18 +583,17 @@ class Board:
         if cfg.options.ekf_single:
             env.CXXFLAGS += ['-DHAL_WITH_EKF_DOUBLE=0']
 
-        if cfg.options.consistent_builds:
+        if cfg.env.CONSISTENT_BUILDS:
             # if symbols are renamed we don't want them to affect the output:
             env.CXXFLAGS += ['-fno-rtti']
             # avoid different filenames for the same source file
             # affecting the compiler output:
             env.CXXFLAGS += ['-frandom-seed=4']  # ob. xkcd
 
-            # stop including a unique ID in the headers.  More useful
-            # when trying to find binary differences as the build-id
-            # appears to be a hash of the output products
-            # (ie. identical for identical compiler output):
-            env.LDFLAGS += ['-Wl,--build-id=bob']
+            # disable setting build ID in the ELF header. though if two binaries
+            # are identical they will have the same build ID, setting it avoids
+            # creating a difference if they are not in a way we care about.
+            env.LDFLAGS += ['-Wl,--build-id=none']
             # squash all line numbers to be the number 17
             env.CXXFLAGS += [
                 "-D__AP_LINE__=17",
@@ -596,13 +623,18 @@ class Board:
 
     def build(self, bld):
         git_hash_ext = bld.git_head_hash(short=True, hash_abbrev=16)
-        bld.ap_version_append_str('GIT_VERSION', bld.git_head_hash(short=True))
-        bld.ap_version_append_str('GIT_VERSION_EXTENDED', git_hash_ext)
-        bld.ap_version_append_int('GIT_VERSION_INT', int("0x" + bld.git_head_hash(short=True), base=16))
-        bld.ap_version_append_str('AP_BUILD_ROOT', bld.srcnode.abspath())
-        import time
-        ltime = time.localtime()
+        bld.ap_version_append_str('GIT_VERSION', bld.git_head_hash(short=True), "abcdef")
+        bld.ap_version_append_str('GIT_VERSION_EXTENDED', git_hash_ext, "0123456789abcdef")
+        bld.ap_version_append_int('GIT_VERSION_INT', int("0x" + bld.git_head_hash(short=True), base=16), 15)
+        # this build root is mostly used as a temporary directory by SIM_JSBSim and probably needs to go
+        bld.ap_version_append_str('AP_BUILD_ROOT', bld.srcnode.abspath(), "/tmp")
+
         if bld.env.build_dates:
+            if bld.options.consistent_builds:
+                raise ValueError("can't enable consistent builds and build dates")
+
+            import time
+            ltime = time.localtime()
             bld.ap_version_append_int('BUILD_DATE_YEAR', ltime.tm_year)
             bld.ap_version_append_int('BUILD_DATE_MONTH', ltime.tm_mon)
             bld.ap_version_append_int('BUILD_DATE_DAY', ltime.tm_mday)
@@ -1006,6 +1038,7 @@ class sitl_periph(sitl):
             AP_PERIPH_BUZZER_ENABLED = 0,
             AP_PERIPH_BUZZER_WITHOUT_NOTIFY_ENABLED = 0,
             AP_PERIPH_RTC_GLOBALTIME_ENABLED = 0,
+            AP_PERIPH_ACTUATOR_TELEM_ENABLED = 0,
         )
 
         try:
@@ -1461,7 +1494,7 @@ class chibios(Board):
 
     def build(self, bld):
         super(chibios, self).build(bld)
-        bld.ap_version_append_str('CHIBIOS_GIT_VERSION', bld.git_submodule_head_hash('ChibiOS', short=True))
+        bld.ap_version_append_str('CHIBIOS_GIT_VERSION', bld.git_submodule_head_hash('ChibiOS', short=True), "12345678")
         bld.load('chibios')
 
     def pre_build(self, bld):

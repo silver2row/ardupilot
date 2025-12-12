@@ -219,15 +219,15 @@ bool AC_Circle::update_ms(float climb_rate_ms)
     _angle_total_rad += angle_change_rad;
 
     // calculate terrain adjustments
-    float terr_offset_m = 0.0f;
-    if (_is_terrain_alt && !get_terrain_offset_m(terr_offset_m)) {
+    float terrain_u_m = 0.0f;
+    if (_is_terrain_alt && !get_terrain_U_m(terrain_u_m)) {
         return false;
     }
 
     // calculate z-axis target
     float target_z_m;
     if (_is_terrain_alt) {
-        target_z_m = _center_neu_m.z + terr_offset_m;
+        target_z_m = _center_neu_m.z + terrain_u_m;
     } else {
         target_z_m = _pos_control.get_pos_desired_U_m();
     }
@@ -264,7 +264,7 @@ bool AC_Circle::update_ms(float climb_rate_ms)
         float target_u_m = target_neu_m.z;
         _pos_control.input_pos_vel_accel_U_m(target_u_m, zero_u, 0);
     } else {
-        _pos_control.set_pos_target_U_from_climb_rate_m(climb_rate_ms);
+        _pos_control.set_pos_target_U_from_climb_rate_ms(climb_rate_ms);
     }
 
     // update position controller
@@ -292,12 +292,12 @@ void AC_Circle::get_closest_point_on_circle_NEU_cm(Vector3f& result_neu_cm, floa
     dist_cm = dist_m * 100.0;
 }
 
-// Returns the closest point on the circle to the vehicle's current position in meters.
+// Returns the closest point on the circle to the vehicle's stopping point in meters.
 // The result vector is updated with the NEU position of the closest point on the circle.
 // The altitude (z) is set to match the circle center's altitude.
-// dist_m is updated with the horizontal distance to the circle center.
+// dist_m is updated with the 3D distance to the circle edge from the stopping point.
 // If the vehicle is at the center, the point directly behind the vehicle (based on yaw) is returned.
-void AC_Circle::get_closest_point_on_circle_NEU_m(Vector3p& result_neu_m, float& dist_m) const
+void AC_Circle::get_closest_point_on_circle_NEU_m(Vector3p& result_neu_m, float& dist_to_edge_m) const
 {
     // Get vehicle stopping point from the position controller (in NEU frame, meters)
     Vector3p stopping_point_neu_m;
@@ -305,27 +305,30 @@ void AC_Circle::get_closest_point_on_circle_NEU_m(Vector3p& result_neu_m, float&
     _pos_control.get_stopping_point_U_m(stopping_point_neu_m.z);
 
     // Compute vector from stopping point to the circle center
-    Vector3f vec_to_center_neu_m = (stopping_point_neu_m - _center_neu_m).tofloat();
-    dist_m = vec_to_center_neu_m.length();
-
+    Vector3f vec_from_center_neu_m = (stopping_point_neu_m - _center_neu_m).tofloat();
     // Return circle center if radius is zero (vehicle orbits in place)
     if (!is_positive(_radius_m)) {
         result_neu_m = _center_neu_m;
+        dist_to_edge_m = 0;
         return;
     }
 
+    const float dist_to_center_m_sq = vec_from_center_neu_m.length_squared();
     // Handle edge case: vehicle is at the exact center of the circle
-    if (is_zero(dist_m)) {
+    if (dist_to_center_m_sq < sq(0.5)) {
         result_neu_m.x = _center_neu_m.x - _radius_m * _ahrs.cos_yaw();
         result_neu_m.y = _center_neu_m.y - _radius_m * _ahrs.sin_yaw();
         result_neu_m.z = _center_neu_m.z;
+        dist_to_edge_m = (stopping_point_neu_m - result_neu_m).length();
         return;
     }
 
     // Calculate the closest point on the circle's edge by projecting out from center
-    result_neu_m.x = _center_neu_m.x + vec_to_center_neu_m.x / dist_m * _radius_m;
-    result_neu_m.y = _center_neu_m.y + vec_to_center_neu_m.y / dist_m * _radius_m;
+    const float dist_to_center_m_xy = vec_from_center_neu_m.xy().length();
+    result_neu_m.x = _center_neu_m.x + vec_from_center_neu_m.x / dist_to_center_m_xy * _radius_m;
+    result_neu_m.y = _center_neu_m.y + vec_from_center_neu_m.y / dist_to_center_m_xy * _radius_m;
     result_neu_m.z = _center_neu_m.z;
+    dist_to_edge_m = (stopping_point_neu_m - result_neu_m).length();
 }
 
 // Calculates angular velocity and acceleration limits based on the configured radius and rate.
@@ -413,7 +416,7 @@ AC_Circle::TerrainSource AC_Circle::get_terrain_source() const
 // Returns terrain offset in meters above the EKF origin at the current position.
 // Positive values indicate terrain is above the EKF origin altitude.
 // Terrain source may be rangefinder or terrain database.
-bool AC_Circle::get_terrain_offset_m(float& offset_m)
+bool AC_Circle::get_terrain_U_m(float& terrain_u_m)
 {
     // Determine terrain source and calculate offset accordingly
     switch (get_terrain_source()) {
@@ -422,7 +425,7 @@ bool AC_Circle::get_terrain_offset_m(float& offset_m)
     case AC_Circle::TerrainSource::TERRAIN_FROM_RANGEFINDER:
         if (_rangefinder_healthy) {
             // Use last known healthy rangefinder terrain offset
-            offset_m = _rangefinder_terrain_offset_m;
+            terrain_u_m = _rangefinder_terrain_u_m;
             return true;
         }
         return false;
@@ -432,7 +435,7 @@ bool AC_Circle::get_terrain_offset_m(float& offset_m)
         AP_Terrain *terrain = AP_Terrain::get_singleton();
         if (terrain != nullptr && terrain->height_above_terrain(terr_alt_m, true)) {
             // Calculate offset from EKF origin altitude to terrain altitude
-            offset_m = _pos_control.get_pos_estimate_NEU_m().z - terr_alt_m;
+            terrain_u_m = _pos_control.get_pos_estimate_U_m() - terr_alt_m;
             return true;
         }
 #endif

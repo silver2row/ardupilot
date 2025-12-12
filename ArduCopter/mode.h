@@ -137,6 +137,7 @@ public:
     virtual bool allows_autotune() const { return false; }
     virtual bool allows_flip() const { return false; }
     virtual bool crash_check_enabled() const { return true; }
+    virtual bool move_vehicle_on_ekf_reset() const { return false; }
 
     // "no pilot input" here means eg. in RC failsafe
     virtual bool allows_entry_in_rc_failsafe() const { return true; }
@@ -312,7 +313,7 @@ public:
         enum class Mode {
             HOLD =             0,   // hold zero yaw rate
             LOOK_AT_NEXT_WP =  1,   // point towards next waypoint (no pilot input accepted)
-            ROI =              2,   // point towards a location held in roi_ne_m (no pilot input accepted)
+            ROI =              2,   // point towards a location held in roi_neu_m (no pilot input accepted)
             FIXED =            3,   // point towards a particular angle (no pilot input accepted)
             LOOK_AHEAD =       4,   // point in the direction the copter is moving
             RESET_TO_ARMED_YAW = 5, // point towards heading at time motors were armed
@@ -369,7 +370,7 @@ public:
         Mode _last_mode;
 
         // Yaw will point at this location if mode is set to Mode::ROI
-        Vector3f roi_ne_m;
+        Vector3f roi_neu_m;
 
         // yaw used for YAW_FIXED yaw_mode
         float _fixed_yaw_offset_rad;
@@ -527,6 +528,7 @@ public:
 #if FRAME_CONFIG == HELI_FRAME
     bool allows_inverted() const override { return true; };
 #endif
+    bool move_vehicle_on_ekf_reset() const override;
 
 #if AP_COPTER_ADVANCED_FAILSAFE_ENABLED
     // Return the type of this mode for use by advanced failsafe
@@ -1082,6 +1084,7 @@ public:
     bool is_autopilot() const override { return true; }
     bool has_user_takeoff(bool must_navigate) const override { return true; }
     bool in_guided_mode() const override { return true; }
+    bool move_vehicle_on_ekf_reset() const override;
 
     bool requires_terrain_failsafe() const override { return true; }
 
@@ -1280,7 +1283,6 @@ public:
     bool has_manual_throttle() const override { return false; }
     bool allows_arming(AP_Arming::Method method) const override { return false; };
     bool is_autopilot() const override { return true; }
-
     bool is_landing() const override { return true; };
 
 #if AP_COPTER_ADVANCED_FAILSAFE_ENABLED
@@ -1893,7 +1895,7 @@ public:
     bool allows_arming(AP_Arming::Method method) const override { return false; }
     bool is_autopilot() const override { return true; }
 
-    bool set_velocity(const Vector3f& velocity_neu);
+    bool set_velocity_NEU_ms(const Vector3f& velocity_neu_cms);
 
 protected:
 
