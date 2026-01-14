@@ -32,16 +32,14 @@ void AP_Mount_Servo::update()
 
     update_mnt_target();
 
-    // send target angles or rates depending on the target type
-    switch (mnt_target.target_type) {
-        case MountTargetType::RATE:
-            update_angle_target_from_rate(mnt_target.rate_rads, mnt_target.angle_rad);
-            FALLTHROUGH;
-        case MountTargetType::ANGLE:
-            // update _angle_bf_output_rad based on angle target
-            update_angle_outputs(mnt_target.angle_rad);
-            break;
-    }
+    // have our base class call send_target_angles to command the gimbal:
+    send_target_to_gimbal();
+}
+
+// called by the backend to set the servo angles:
+void AP_Mount_Servo::send_target_angles(const MountAngleTarget& angle_rad)
+{
+    update_angle_outputs(mnt_target.angle_rad);
 
     // write the results to the servos
     move_servo(_roll_idx, degrees(_angle_bf_output_rad.x)*10, _params.roll_angle_min*10, _params.roll_angle_max*10);
@@ -93,7 +91,7 @@ bool AP_Mount_Servo::get_attitude_quaternion(Quaternion& att_quat)
 // private methods
 
 // update body-frame angle outputs from earth-frame angle targets
-void AP_Mount_Servo::update_angle_outputs(const MountTarget& angle_rad)
+void AP_Mount_Servo::update_angle_outputs(const MountAngleTarget& angle_rad)
 {
     const AP_AHRS &ahrs = AP::ahrs();
 
@@ -106,16 +104,19 @@ void AP_Mount_Servo::update_angle_outputs(const MountTarget& angle_rad)
     _angle_bf_output_rad.z = yaw_bf_rad;
 
     // do no stabilization in retract or neutral:
-    switch (get_mode()) {
-    case MAV_MOUNT_MODE_RETRACT:
-    case MAV_MOUNT_MODE_NEUTRAL:
+    switch (mnt_target.target_type) {
+    case MountTargetType::NEUTRAL:
+    case MountTargetType::RETRACTED:
         return;
-    case MAV_MOUNT_MODE_MAVLINK_TARGETING...MAV_MOUNT_MODE_ENUM_END:
+    case MountTargetType::ANGLE:
+    case MountTargetType::RATE:
         break;
     }
 
-    // this is sufficient for self-stabilising brushless gimbals
+    // only have to adjust roll/pitch for body frame in self-stabilising brushless gimbals
     if (!requires_stabilization) {
+        //since this is a shared backend, must call this directly
+        AP_Mount_Backend::adjust_mnt_target_if_RP_locked();
         return;
     }
 
@@ -127,9 +128,14 @@ void AP_Mount_Servo::update_angle_outputs(const MountTarget& angle_rad)
         ahrs_angle_rad.rotate(-yaw_bf_rad);
     }
 
-    // add roll and pitch lean angle correction
-    _angle_bf_output_rad.x -= ahrs_angle_rad.x;
-    _angle_bf_output_rad.y -= ahrs_angle_rad.y;
+    // add roll and pitch lean angle correction for earth frame
+    if (angle_rad.roll_is_ef){
+        _angle_bf_output_rad.x -= ahrs_angle_rad.x;
+    }
+    
+    if (angle_rad.pitch_is_ef){
+        _angle_bf_output_rad.y -= ahrs_angle_rad.y;
+    } 
 
     // lead filter
     const Vector3f &gyro = ahrs.get_gyro();
