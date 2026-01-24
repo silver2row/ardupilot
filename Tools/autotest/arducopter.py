@@ -4629,7 +4629,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.load_mission("copter_rtl_speed.txt")
         self.set_parameters({
             'WPNAV_ACCEL': wpnav_accel_mss * 100,
-            'RTL_SPEED': rtl_speed_ms * 100,
+            'RTL_SPEED_MS': rtl_speed_ms,
             'WPNAV_SPEED': wpnav_speed_ms * 100,
         })
         self.change_mode('LOITER')
@@ -5190,19 +5190,19 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.wait_descent_rate(land_speed_low, minimum_duration=land_low_maintain)
             self.wait_disarmed()
 
-        # test the defaults.  By default LAND_SPEED_HIGH is 0 so
+        # test the defaults.  By default LAND_SPD_HIGH_MS is 0 so
         # WPNAV_SPEED_DN is used
         check_landing_speeds(
             self.get_parameter("WPNAV_SPEED_DN") / 100,  # cm/s -> m/s
-            self.get_parameter("LAND_SPEED") / 100,  # cm/s -> m/s
-            self.get_parameter("LAND_ALT_LOW") / 100 # cm -> m
+            self.get_parameter("LAND_SPD_MS"),
+            self.get_parameter("LAND_ALT_LOW_M")
         )
 
         def test_landing_speeds(land_speed_high, land_speed_low, land_alt_low, **kwargs):
             self.set_parameters({
-                "LAND_SPEED_HIGH": land_speed_high * 100,  # m/s -> cm/s
-                "LAND_SPEED": land_speed_low * 100,  # m/s -> cm/s
-                "LAND_ALT_LOW": land_alt_low * 100,  # m -> cm
+                "LAND_SPD_HIGH_MS": land_speed_high,
+                "LAND_SPD_MS": land_speed_low,
+                "LAND_ALT_LOW_M": land_alt_low
             })
             check_landing_speeds(land_speed_high, land_speed_low, land_alt_low, **kwargs)
 
@@ -6627,6 +6627,39 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.setup_servo_mount()
         self.reboot_sitl() # to handle MNT_TYPE changing
         self.mount_test_body()
+
+    def MountPOIFromAuxFunction(self):
+        '''test we can lock onto a lat/lng/alt with the flick of a switch'''
+        self.install_terrain_handlers_context()
+        self.setup_servo_mount()
+        self.set_parameters({
+            "RC10_OPTION": 186,
+            "MNT1_RC_RATE": 0,
+            "TERRAIN_ENABLE": 1,
+            "SIM_TERRAIN": 1,
+        })
+        self.reboot_sitl()  # to handle MNT1_TYPE changing # to handle MNT1_TYPE changing
+        self.wait_ready_to_arm()
+
+        self.takeoff(10, mode='GUIDED')
+        self.set_rc(6, 1000)
+        self.set_rc(10, 1900)  # engage poi lock
+
+        self.progress("checking mount angles")
+        mount_roll, mount_pitch, mount_yaw, mount_yaw_is_absolute = self.get_mount_roll_pitch_yaw_deg()
+        assert -46 <= mount_pitch <= -44, f"Pitch is out of range: {mount_pitch}"
+        self.fly_guided_move_local(100, 100, 70)   # move and check that pitch and yaw track
+        mount_roll, mount_pitch, mount_yaw, mount_yaw_is_absolute = self.get_mount_roll_pitch_yaw_deg()
+        assert -17 <= mount_pitch <= -15, f"Pitch2 is out of range: {mount_pitch}"
+        assert -179 <= mount_yaw <= -176, f"Yaw2 is out of range: {mount_yaw}"
+        self.set_rc(10, 1500)  # switch to middle to return to RC target mode and check that mount reverts to initial angles
+        mount_roll, mount_pitch, mount_yaw, mount_yaw_is_absolute = self.get_mount_roll_pitch_yaw_deg()
+        assert -46 <= mount_pitch <= -44, f"Pitch3 is out of range: {mount_pitch}"
+        assert -1 <= mount_yaw <= 1, f"Yaw3 is out of range: {mount_yaw}"
+
+        self.change_mode('RTL')
+        self.wait_disarmed()
+        self.assert_at_home()
 
     def MountSolo(self):
         '''test type=2, a "Solo" mount'''
@@ -10405,7 +10438,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "SERIAL5_PROTOCOL": 1,
             "RNGFND1_TYPE": 10,
-            "RTL_ALT": 500,
+            "RTL_ALT_M": 5,
             "RTL_ALT_TYPE": 1,
             "SIM_TERRAIN": 0,
         })
@@ -10512,7 +10545,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         '''fly the type=100 perfect rangefinder'''
         self.set_parameters({
             "RNGFND1_TYPE": 100,
-            "RTL_ALT": 500,
+            "RTL_ALT_M": 5,
             "RTL_ALT_TYPE": 1,
             "SIM_TERRAIN": 0,
         })
@@ -10523,7 +10556,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
     def RangeFinderDrivers(self):
         '''Test rangefinder drivers'''
         self.set_parameters({
-            "RTL_ALT": 500,
+            "RTL_ALT_M": 5,
             "RTL_ALT_TYPE": 1,
             "SIM_TERRAIN": 0,
         })
@@ -11683,8 +11716,8 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.wait_disarmed()
         self.reboot_sitl()
 
-    def RTL_ALT_FINAL(self):
-        '''Test RTL with RTL_ALT_FINAL'''
+    def RTL_ALT_FINAL_M(self):
+        '''Test RTL with RTL_ALT_FINAL_M'''
         self.progress("arm the vehicle and takeoff in Guided")
         self.takeoff(20, mode='GUIDED')
 
@@ -11694,7 +11727,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.progress("fly 50m North (or whatever)")
         self.fly_guided_move_local(50, 0, 50)
         target_alt = 10
-        self.set_parameter('RTL_ALT_FINAL', target_alt * 100)
+        self.set_parameter('RTL_ALT_FINAL_M', target_alt)
 
         self.progress("Waiting RTL to reach Home and hold")
         self.change_mode('RTL')
@@ -12893,6 +12926,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
              self.MAV_CMD_DO_MOUNT_CONTROL,
              self.MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE,
              self.AutoYawDO_MOUNT_CONTROL,
+             self.MountPOIFromAuxFunction,
              self.Button,
              self.ShipTakeoff,
              self.RangeFinder,
@@ -14557,8 +14591,8 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         defaults_filepath = tempfile.NamedTemporaryFile(mode='w', delete=False)
         defaults_filepath.write("""
 DISARM_DELAY 77 @READONLY
-RTL_ALT 123
-RTL_ALT_FINAL 129
+RTL_ALT_M 123
+RTL_ALT_FINAL_M 129
 """)
         defaults_filepath.close()
         self.customise_SITL_commandline([
@@ -14569,15 +14603,15 @@ RTL_ALT_FINAL 129
 
         self.wait_statustext("Param write denied (DISARM_DELAY)")
         self.assert_parameter_value("DISARM_DELAY", 77)
-        self.assert_parameter_value("RTL_ALT", 123)
+        self.assert_parameter_value("RTL_ALT_M", 123)
 
         self.start_subtest('Ensure something is writable....')
-        self.set_parameter('RTL_ALT_FINAL', 101)
+        self.set_parameter('RTL_ALT_FINAL_M', 101)
 
         new_values_filepath = tempfile.NamedTemporaryFile(mode='w', delete=False)
         new_values_filepath.write("""
 DISARM_DELAY 99
-RTL_ALT 111
+RTL_ALT_M 111
 """)
         new_values_filepath.close()
 
@@ -14592,8 +14626,8 @@ RTL_ALT 111
         self.stop_mavproxy(mavproxy)
 
         self.assert_parameter_value("DISARM_DELAY", 77)
-        self.assert_parameter_value("RTL_ALT", 111)
-        self.assert_parameter_value('RTL_ALT_FINAL', 101)
+        self.assert_parameter_value("RTL_ALT_M", 111)
+        self.assert_parameter_value('RTL_ALT_FINAL_M', 101)
 
     def ScriptingFlipMode(self):
         '''test adding custom mode from scripting'''
@@ -14891,7 +14925,7 @@ RTL_ALT 111
         })
         self.context_push()
         self.set_parameters({
-            'RTL_SPEED': 100,  # cm/s
+            'RTL_SPEED_MS': 1,  # m/s
         })
 
         self.change_mode('AUTO')
@@ -15105,15 +15139,15 @@ RTL_ALT 111
         # PARAM_SET_ENABLE back to its original value (enabled!),
         # which can cause problems resetting
         orig_parameter_values = self.get_parameters([
-            'RTL_ALT',
+            'RTL_ALT_M',
             'DISARM_DELAY',
         ])
 
         self.wait_ready_to_arm()  # scripts will be ready by now!
-        self.start_subtest("set RTL_ALT freely")
+        self.start_subtest("set RTL_ALT_M freely")
         self.context_collect("STATUSTEXT")
-        self.set_parameter("RTL_ALT", 23)
-        self.set_parameter("RTL_ALT", 28)
+        self.set_parameter("RTL_ALT_M", 0.23)
+        self.set_parameter("RTL_ALT_M", 0.28)
         # Ensure there are no scripting errors.
         error = self.statustext_in_collections("Internal Error")
         if error is not None:
@@ -15616,7 +15650,7 @@ return update, 1000
             self.GSF,
             self.GSF_reset,
             self.AP_Avoidance,
-            self.RTL_ALT_FINAL,
+            self.RTL_ALT_FINAL_M,
             self.SMART_RTL,
             self.SMART_RTL_EnterLeave,
             self.SMART_RTL_Repeat,
