@@ -1151,8 +1151,17 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         if abs(x.alt_msl - (original_alt+30)) > 10:
             raise NotAchievedException("Bad absalt (want=%f vs got=%f)" % (original_alt+30, x.alt_msl))
 
-        self.change_mode('LOITER')
-        self.delay_sim_time(10)
+        loc = self.mav.location()
+        self.run_cmd_int(
+            mavutil.mavlink.MAV_CMD_DO_REPOSITION,
+            p2=mavutil.mavlink.MAV_DO_REPOSITION_FLAGS_CHANGE_MODE,
+            p5=int(loc.lat * 1e7),
+            p6=int(loc.lng * 1e7),
+            p7=x.alt_rel,    # alt
+            frame=mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+        )
+        expected_radius = 100
+        self.wait_circling_point_with_radius(loc, expected_radius)
 
         self.context_collect('CAMERA_FEEDBACK')
         self.set_rc(12, 2000)
@@ -3161,7 +3170,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             "SERIAL4_PROTOCOL": 36,
             "SERIAL4_BAUD": 230400,
             "GPS1_TYPE": 1, # Auto
-            "GPS2_TYPE": 21, # EARHS
+            "GPS2_TYPE": 21, # EAHRS
             "AHRS_EKF_TYPE": 11,
             "INS_GYR_CAL": 1,
             "EAHRS_SENSORS": 13, # GPS is enabled

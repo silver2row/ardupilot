@@ -46,17 +46,13 @@ files for files with a filename of *.shtml. Here is an example:
   </head>
   <body>
     <h1>Server Side Scripting Test</h1>
-    <table>
-      <tr><th>Roll</th><th>Pitch</th><th>Yaw</th></tr>
-      <tr>
-      <td><?lua return tostring(math.deg(ahrs:get_roll_rad()))?></td>
-      <td><?lstr math.deg(ahrs:get_pitch_rad())?></td>
-      <td><?lstr math.deg(ahrs:get_yaw_rad())?></td>
-      </tr>
-    </table>
+    | Roll | Pitch | Yaw |
+| --- | --- | --- |
+|  |  |  |
   </body>
 </html>
 ```
+
 In this example we are using two forms of embedded lua scripts. The
 first form starts with "<?lua" and requires you to have a return
 statement at the end which returns a string. This form can use as many
@@ -76,6 +72,7 @@ called "cgi-bin" in the root of the microSD card. The files must have
 a file extension of ".lua".
 
 Here is an example of a simple cgi script:
+
 ```
 --[[
 example lua cgi file for cgi-bin/ folder
