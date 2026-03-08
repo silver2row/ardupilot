@@ -120,36 +120,6 @@ void GCS_MAVLINK_Rover::send_nav_controller_output() const
         control_mode->crosstrack_error());
 }
 
-void GCS_MAVLINK_Rover::send_servo_out()
-{
-    float motor1, motor3;
-    if (rover.g2.motors.have_skid_steering()) {
-        motor1 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_throttleLeft) * 0.001f);
-        motor3 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_throttleRight) * 0.001f);
-    } else {
-        motor1 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_steering) / 4500.0f);
-        motor3 = 10000 * (SRV_Channels::get_output_scaled(SRV_Channel::k_throttle) * 0.01f);
-    }
-    mavlink_msg_rc_channels_scaled_send(
-        chan,
-        millis(),
-        0,  // port 0
-        motor1,
-        0,
-        motor3,
-        0,
-        0,
-        0,
-        0,
-        0,
-#if AP_RSSI_ENABLED
-        receiver_rssi()
-#else
-        UINT8_MAX
-#endif
-        );
-}
-
 int16_t GCS_MAVLINK_Rover::vfr_hud_throttle() const
 {
     return rover.g2.motors.get_throttle();
@@ -320,7 +290,7 @@ void GCS_MAVLINK_Rover::send_pid_tuning()
     // left wheel rate control pid
     if (g.gcs_pid_mask & 8) {
         pid_info = &g2.wheel_rate_control.get_pid(0).get_pid_info();
-        mavlink_msg_pid_tuning_send(chan, 7,
+        mavlink_msg_pid_tuning_send(chan, PID_TUNING_WHEEL_LEFT,
                                     pid_info->target,
                                     pid_info->actual,
                                     pid_info->FF,
@@ -337,7 +307,7 @@ void GCS_MAVLINK_Rover::send_pid_tuning()
     // right wheel rate control pid
     if (g.gcs_pid_mask & 16) {
         pid_info = &g2.wheel_rate_control.get_pid(1).get_pid_info();
-        mavlink_msg_pid_tuning_send(chan, 8,
+        mavlink_msg_pid_tuning_send(chan, PID_TUNING_WHEEL_RIGHT,
                                     pid_info->target,
                                     pid_info->actual,
                                     pid_info->FF,
@@ -354,7 +324,7 @@ void GCS_MAVLINK_Rover::send_pid_tuning()
     // sailboat heel to mainsail pid
     if (g.gcs_pid_mask & 32) {
         pid_info = &g2.attitude_control.get_sailboat_heel_pid().get_pid_info();
-        mavlink_msg_pid_tuning_send(chan, 9,
+        mavlink_msg_pid_tuning_send(chan, PID_TUNING_SAIL_HEEL,
                                     pid_info->target,
                                     pid_info->actual,
                                     pid_info->FF,
@@ -371,7 +341,7 @@ void GCS_MAVLINK_Rover::send_pid_tuning()
     // Position Controller Velocity North PID
     if (g.gcs_pid_mask & 64) {
         pid_info = &g2.pos_control.get_vel_pid().get_pid_info_x();
-        mavlink_msg_pid_tuning_send(chan, 10,
+        mavlink_msg_pid_tuning_send(chan, PID_TUNING_VEL_NORTH,
                                     pid_info->target,
                                     pid_info->actual,
                                     pid_info->FF,
@@ -388,7 +358,7 @@ void GCS_MAVLINK_Rover::send_pid_tuning()
     // Position Controller Velocity East PID
     if (g.gcs_pid_mask & 128) {
         pid_info = &g2.pos_control.get_vel_pid().get_pid_info_y();
-        mavlink_msg_pid_tuning_send(chan, 11,
+        mavlink_msg_pid_tuning_send(chan, PID_TUNING_VEL_EAST,
                                     pid_info->target,
                                     pid_info->actual,
                                     pid_info->FF,
@@ -411,7 +381,7 @@ void Rover::send_wheel_encoder_distance(const mavlink_channel_t chan)
         for (uint8_t i = 0; i < g2.wheel_encoder.num_sensors(); i++) {
             distances[i] = wheel_encoder_last_distance_m[i];
         }
-        mavlink_msg_wheel_distance_send(chan, 1000UL * AP_HAL::millis(), g2.wheel_encoder.num_sensors(), distances);
+        mavlink_msg_wheel_distance_send(chan, AP_HAL::micros64(), g2.wheel_encoder.num_sensors(), distances);
     }
 }
 
@@ -424,11 +394,6 @@ bool GCS_Rover::vehicle_initialised() const
 bool GCS_MAVLINK_Rover::try_send_message(enum ap_message id)
 {
     switch (id) {
-
-    case MSG_SERVO_OUT:
-        CHECK_PAYLOAD_SIZE(RC_CHANNELS_SCALED);
-        send_servo_out();
-        break;
 
     case MSG_WHEEL_DISTANCE:
         CHECK_PAYLOAD_SIZE(WHEEL_DISTANCE);
@@ -1057,15 +1022,19 @@ uint8_t GCS_MAVLINK_Rover::send_available_mode(uint8_t index) const
 
     // Ask the mode for its name and number
     const char* name = modes[index_zero]->name();
-    const uint8_t mode_number = (uint8_t)modes[index_zero]->mode_number();
+    const Mode::Number mode_number = modes[index_zero]->mode_number();
+
+    // the check here must be the same as the one in `get_available_mode_enabled_mask`
+    const bool user_selectable = modes[index_zero]->enabled() && rover.gcs_mode_enabled(mode_number);
 
     mavlink_msg_available_modes_send(
         chan,
         mode_count,
         index,
         MAV_STANDARD_MODE::MAV_STANDARD_MODE_NON_STANDARD,
-        mode_number,
-        0, // MAV_MODE_PROPERTY bitmask
+        (uint8_t)mode_number,
+        // MAV_MODE_PROPERTY bitmask,
+        user_selectable ? 0 : MAV_MODE_PROPERTY_NOT_USER_SELECTABLE,
         name
     );
 

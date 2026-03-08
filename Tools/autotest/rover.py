@@ -1834,15 +1834,15 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         # Trigger telemetry loss with failsafe enabled. Verify
         # failsafe triggers to RTL. Restore telemetry, verify failsafe
         # clears, and change modes.
-        # TODO not implemented
-        # self.start_subtest("GCS failsafe recovery test: FS_GCS_ENABLE=1")
-        # self.setGCSfailsafe(1)
-        # self.set_heartbeat_rate(0)
-        # self.wait_mode("RTL")
-        # self.set_heartbeat_rate(self.speedup)
-        # self.wait_statustext("GCS Failsafe Cleared", timeout=60)
-        # self.change_mode("MANUAL")
-        # self.end_subtest("Completed GCS failsafe recovery test")
+        self.start_subtest("GCS failsafe recovery test: FS_GCS_ENABLE=1")
+        self.setGCSfailsafe(1)
+        go_somewhere()
+        self.set_heartbeat_rate(0)
+        self.wait_mode("RTL")
+        self.set_heartbeat_rate(self.speedup)
+        self.wait_statustext("GCS Failsafe Cleared", timeout=60)
+        self.change_mode("MANUAL")
+        self.end_subtest("Completed GCS failsafe recovery test")
 
         # Trigger telemetry loss with failsafe enabled. Verify failsafe triggers and RTL completes
         self.start_subtest("GCS failsafe RTL with no options test: FS_GCS_ENABLE=1")
@@ -2622,7 +2622,7 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
 
     def check_rally_items_same(self, want, got, epsilon=None):
         check_atts = ['mission_type', 'command', 'x', 'y', 'z', 'seq', 'param1']
-        return self.check_mission_items_same(check_atts, want, got, epsilon=epsilon)
+        return self.check_mission_items_same('rally', check_atts, want, got, epsilon=epsilon)
 
     def click_three_in(self, mavproxy, target_system=1, target_component=1):
         mavproxy.send('rally clear\n')
@@ -7017,8 +7017,6 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
 
         self.correct_wp_seq_numbers(fence)
         self.check_fence_upload_download(fence)
-
-        self.delay_sim_time(1000)
 
     def ManyMAVLinkConnections(self):
         '''test testing >8 MAVLink connections'''

@@ -387,17 +387,17 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             "Q_A_RAT_RLL_I",
             "Q_A_RAT_RLL_D",
             "Q_A_ANG_RLL_P",
-            "Q_A_ACCEL_R_MAX",
+            "Q_A_ACC_R_MAX",
+            "Q_A_ACC_P_MAX",
+            "Q_A_ACC_Y_MAX",
             "Q_A_RAT_PIT_P",
             "Q_A_RAT_PIT_I",
             "Q_A_RAT_PIT_D",
             "Q_A_ANG_PIT_P",
-            "Q_A_ACCEL_P_MAX",
             "Q_A_RAT_YAW_P",
             "Q_A_RAT_YAW_I",
             "Q_A_RAT_YAW_FLTE",
             "Q_A_ANG_YAW_P",
-            "Q_A_ACCEL_Y_MAX",
         ])
         self.set_parameters(parameter_values)
 
@@ -1691,7 +1691,7 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             "SCR_ENABLE": 1,
             "SIM_SHIP_ENABLE": 1,
             "SIM_SHIP_SPEED": 5,
-            "Q_WP_SPEED": 700,
+            "Q_WP_SPD": 7.0,
             "Q_P_NE_POS_P": 0.25,
             "Q_P_NE_VEL_D": 0.25,
             "Q_P_NE_VEL_I": 0.25,
@@ -2088,7 +2088,7 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         })
         self.reboot_sitl()
 
-        self.assert_mode_is('FBWA')
+        self.wait_mode('FBWA')  # initial mode from parameter
         self.delay_sim_time(10)
         self.change_mode('QHOVER')
         self.delay_sim_time(10)
@@ -2515,9 +2515,9 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         '''test recovery from inverted flight is fast'''
 
         self.set_parameters({
-            "Q_A_ACCEL_R_MAX": 20000,
-            "Q_A_ACCEL_P_MAX": 20000,
-            "Q_A_ACCEL_Y_MAX": 20000,
+            "Q_A_ACC_R_MAX": 200,
+            "Q_A_ACC_P_MAX": 200,
+            "Q_A_ACC_Y_MAX": 200,
             "Q_A_RATE_R_MAX": 50,
             "Q_A_RATE_P_MAX": 50,
             "Q_A_RATE_Y_MAX": 50,
